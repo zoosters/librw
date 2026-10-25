@@ -509,6 +509,7 @@ assert(natras->format == GL_RGBA);
 		assert(raster->pixels == nil);
 		raster->pixels = px;
 		glReadBuffer(GL_BACK);
+		glPixelStorei(GL_PACK_ALIGNMENT, 1);	// zoosters: rows of width*3 bytes, tightly packed (the default 4 overruns px)
 		glReadPixels(0, 0, raster->width, raster->height, GL_RGB, GL_UNSIGNED_BYTE, px);
 
 		raster->privateFlags = lockMode;
