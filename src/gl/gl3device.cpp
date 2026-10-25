@@ -695,7 +695,7 @@ rasterContextRender(Raster *src, Rect *rect, bool32 scaled, bool32 alpha)
 	SetRenderState(TEXTUREADDRESSU, oAU);
 	SetRenderState(TEXTUREADDRESSV, oAV);
 	bindFramebuffer(prev);
-	if(engine->currentCamera)
+	if(engine->currentCamera && ((Camera*)engine->currentCamera)->frameBuffer)	// (none between levels: the loading screen)
 		setViewport(((Camera*)engine->currentCamera)->frameBuffer);
 	return 1;
 }
