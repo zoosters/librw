@@ -28,6 +28,7 @@ static Shader *envShader, *envShader_noAT;
 static Shader *envShader_fullLight, *envShader_fullLight_noAT;
 static Shader *envPassShader;	// zoosters
 static Matrix *envLogWorld;	// zoosters: the atomic LTM of the mesh being drawn (PORT_ENVLOG only)
+static Shader *uvShader, *uvShader_noAT, *uvShader_fullLight, *uvShader_fullLight_noAT;	// zoosters
 static int32 u_texMatrix;
 static int32 u_fxparams;
 static int32 u_colorClamp;
@@ -56,6 +57,65 @@ matfxDefaultRender(InstanceDataHeader *header, InstanceData *inst, int32 vsBits,
 		else
 			defaultShader_fullLight_noAT->use();
 	}
+
+	drawInst(header, inst);
+}
+
+// zoosters: MatFX UV transform, as RW 3.6's D3D8 MatFX does it: rpMATFXEFFECTUVTRANSFORM draws with the default render, which sets
+// the base transform as stage 0's texture matrix (D3DTTFF_COUNT2, _11 _12 = right.xy, _21 _22 = up.xy, _31 _32 = pos.xy; skipped for a null /
+// identity-flagged matrix): u' = u*right.x + v*up.x + pos.x, v' = u*right.y + v*up.y + pos.y. librw had no UV transform
+// (used e.g. to scroll water). The vertex shader is librw's default.vert with the texcoord line transformed.
+static const char *uvxform_vert_src =
+"uniform mat4 u_texMatrix;\n"
+"VSIN(ATTRIB_POS)	vec3 in_pos;\n"
+"VSOUT vec4 v_color;\n"
+"VSOUT vec2 v_tex0;\n"
+"VSOUT float v_fog;\n"
+"void\n"
+"main(void)\n"
+"{\n"
+"	vec4 Vertex = u_world * vec4(in_pos, 1.0);\n"
+"	gl_Position = u_proj * u_view * Vertex;\n"
+"	vec3 Normal = mat3(u_world) * in_normal;\n"
+"	v_tex0 = (u_texMatrix * vec4(in_tex0, 0.0, 1.0)).xy;\n"
+"	v_color = in_color;\n"
+"	v_color.rgb += u_ambLight.rgb*surfAmbient;\n"
+"	v_color.rgb += DoDynamicLight(Vertex.xyz, Normal)*surfDiffuse;\n"
+"	v_color = clamp(v_color, 0.0, 1.0);\n"
+"	v_color *= u_matColor;\n"
+"	v_fog = DoFog(gl_Position.w);\n"
+"}\n";
+
+static void
+matfxUVTransformRender(InstanceDataHeader *header, InstanceData *inst, int32 vsBits, uint32 flags, Matrix *base)
+{
+	if(base == nil || (base->flags & Matrix::IDENTITY)){
+		matfxDefaultRender(header, inst, vsBits, flags);
+		return;
+	}
+	Material *m = inst->material;
+	setMaterial(flags, m->color, m->surfaceProps);
+	setTexture(0, m->texture);
+	rw::SetRenderState(VERTEXALPHA, inst->vertexAlpha || m->color.alpha != 0xFF);
+
+	RawMatrix t;
+	t.right.set(base->right.x, base->right.y, 0.0f); t.rightw = 0.0f;
+	t.up.set(base->up.x, base->up.y, 0.0f); t.upw = 0.0f;
+	t.at.set(0.0f, 0.0f, 1.0f); t.atw = 0.0f;
+	t.pos.set(base->pos.x, base->pos.y, 0.0f); t.posw = 1.0f;
+
+	if((vsBits & VSLIGHT_MASK) == 0){
+		if(getAlphaTest())
+			uvShader->use();
+		else
+			uvShader_noAT->use();
+	}else{
+		if(getAlphaTest())
+			uvShader_fullLight->use();
+		else
+			uvShader_fullLight_noAT->use();
+	}
+	setUniform(u_texMatrix, &t);
 
 	drawInst(header, inst);
 }
@@ -271,6 +331,9 @@ matfxRenderCB(Atomic *atomic, InstanceDataHeader *header)
 		case MatFX::ENVMAP:
 			matfxEnvRender(header, inst, vsBits, flags, &matfx->fx[0].env);
 			break;
+		case MatFX::UVTRANSFORM:	// zoosters
+			matfxUVTransformRender(header, inst, vsBits, flags, matfx->fx[0].uvtransform.baseTransform);
+			break;
 		default:
 			matfxDefaultRender(header, inst, vsBits, flags);
 			break;
@@ -317,6 +380,22 @@ matfxOpen(void *o, int32, int32)
 	envPassShader = Shader::create(vs, fs_envpass);
 	assert(envPassShader);
 
+	{	// zoosters: the UV transform variants of the default shader
+#include "shaders/simple_fs_gl.inc"
+		const char *vs_uv[] = { shaderDecl, header_vert_src, uvxform_vert_src, nil };
+		const char *vs_uv_fullLight[] = { shaderDecl, "#define DIRECTIONALS\n#define POINTLIGHTS\n#define SPOTLIGHTS\n", header_vert_src, uvxform_vert_src, nil };
+		const char *fs_uv[] = { shaderDecl, header_frag_src, simple_frag_src, nil };
+		const char *fs_uv_noAT[] = { shaderDecl, "#define NO_ALPHATEST\n", header_frag_src, simple_frag_src, nil };
+		uvShader = Shader::create(vs_uv, fs_uv);
+		assert(uvShader);
+		uvShader_noAT = Shader::create(vs_uv, fs_uv_noAT);
+		assert(uvShader_noAT);
+		uvShader_fullLight = Shader::create(vs_uv_fullLight, fs_uv);
+		assert(uvShader_fullLight);
+		uvShader_fullLight_noAT = Shader::create(vs_uv_fullLight, fs_uv_noAT);
+		assert(uvShader_fullLight_noAT);
+	}
+
 	return o;
 }
 
@@ -336,6 +415,10 @@ matfxClose(void *o, int32, int32)
 	envShader_fullLight_noAT = nil;
 	envPassShader->destroy();
 	envPassShader = nil;
+	uvShader->destroy(); uvShader = nil;	// zoosters
+	uvShader_noAT->destroy(); uvShader_noAT = nil;
+	uvShader_fullLight->destroy(); uvShader_fullLight = nil;
+	uvShader_fullLight_noAT->destroy(); uvShader_fullLight_noAT = nil;
 
 	return o;
 }
