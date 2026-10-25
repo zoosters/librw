@@ -1438,6 +1438,239 @@ rasterRenderFast(Raster *raster, int32 x, int32 y)
 }
 
 
+// ---- raster context operations (Raster::pushContext + Clear/Render*)
+// RwRasterPushContext only records the target raster; RwRasterClear / RwRasterRenderFast / RwRasterRenderScaled then draw into it.
+// Targets: CAMERA = the default render target (RW: the device's current one),
+// CAMERATEXTURE = level 0 of its texture. Sources: any texture raster (a screen aligned textured quad) or CAMERA (StretchRect).
+extern float im2dXformW, im2dXformH;	// d3dimmed.cpp: pre-transformed Im2D coordinates of the context target (0 = current camera)
+
+static IDirect3DSurface9*
+contextSurface(Raster *ctx)
+{
+	Raster *top = ctx->parent ? ctx->parent : ctx;
+	D3dRaster *nat = GETD3DRASTEREXT(top);
+	IDirect3DSurface9 *s = nil;
+	if(top->type == Raster::CAMERA){
+		s = d3d9Globals.defaultRenderTarget;
+		s->AddRef();
+	}else if(top->type == Raster::CAMERATEXTURE && nat->texture)
+		((IDirect3DTexture9*)nat->texture)->GetSurfaceLevel(0, &s);
+	return s;
+}
+
+struct ContextTarget
+{
+	IDirect3DSurface9 *surf, *prevRT, *prevDepth;
+	D3DVIEWPORT9 prevVP;
+};
+
+static bool
+beginContext(Raster *ctx, ContextTarget *t)
+{
+	t->surf = contextSurface(ctx);
+	if(t->surf == nil)
+		return false;
+	t->prevRT = deviceCache.renderTargets[0];
+	t->prevDepth = deviceCache.depthSurface;
+	d3ddevice->GetViewport(&t->prevVP);
+	setRenderTarget(0, t->surf);
+	// a depth surface smaller than the target would invalidate the draw; nothing here uses depth
+	setDepthSurface(nil);
+	return true;
+}
+
+static void
+endContext(ContextTarget *t)
+{
+	setRenderTarget(0, t->prevRT);
+	setDepthSurface(t->prevDepth);
+	d3ddevice->SetViewport(&t->prevVP);
+	t->surf->Release();
+}
+
+// the packed pixel of the raster's own format -> A8R8G8B8
+static uint32
+pixelTo8888(uint32 p, int32 format)
+{
+	uint32 a, r, g, b;
+	switch(format & 0xF00){
+	case Raster::C1555:
+		a = (p>>15&1) ? 255 : 0; r = p>>10&31; g = p>>5&31; b = p&31;
+		r = r<<3|r>>2; g = g<<3|g>>2; b = b<<3|b>>2;
+		break;
+	case Raster::C555:
+		a = 255; r = p>>10&31; g = p>>5&31; b = p&31;
+		r = r<<3|r>>2; g = g<<3|g>>2; b = b<<3|b>>2;
+		break;
+	case Raster::C565:
+		a = 255; r = p>>11&31; g = p>>5&63; b = p&31;
+		r = r<<3|r>>2; g = g<<2|g>>4; b = b<<3|b>>2;
+		break;
+	case Raster::C4444:
+		a = p>>12&15; r = p>>8&15; g = p>>4&15; b = p&15;
+		a *= 17; r *= 17; g *= 17; b *= 17;
+		break;
+	default:
+		return p;
+	}
+	return a<<24 | r<<16 | g<<8 | b;
+}
+
+bool32
+rasterContextClear(uint32 pixel)
+{
+	Raster *ctx = Raster::getCurrentContext();
+	if(ctx == nil)
+		return 0;
+	Raster *top = ctx->parent ? ctx->parent : ctx;
+	switch(top->type){
+	case Raster::CAMERA:
+	case Raster::CAMERATEXTURE: {
+		ContextTarget t;
+		if(!beginContext(ctx, &t))
+			return 0;
+		uint32 c = ctx->depth != 32 ? pixelTo8888(pixel, ctx->format) : pixel;
+		D3DSURFACE_DESC desc;
+		t.surf->GetDesc(&desc);
+		D3DVIEWPORT9 vp = { 0, 0, desc.Width, desc.Height, 0.0f, 1.0f };	// Clear is clipped to the viewport
+		d3ddevice->SetViewport(&vp);
+		D3DRECT rc;
+		rc.x1 = ctx->offsetX;
+		rc.y1 = ctx->offsetY;
+		rc.x2 = rc.x1 + ctx->width;
+		rc.y2 = rc.y1 + ctx->height;
+		d3ddevice->Clear(1, &rc, D3DCLEAR_TARGET, c, 1.0f, 0);
+		endContext(&t);
+		return 1;
+		}
+	case Raster::NORMAL:
+	case Raster::TEXTURE: {
+		// lock the raster and fill the pixels
+		D3dRaster *nat = GETD3DRASTEREXT(top);
+		if(top->depth != 32 && top->depth != 16)
+			return 0;
+		uint8 *pix = top->lock(0, Raster::LOCKWRITE);
+		if(pix == nil)
+			return 0;
+		for(int32 y = 0; y < ctx->height; y++){
+			uint8 *row = pix + (ctx->offsetY + y)*top->stride + ctx->offsetX*nat->bpp;
+			for(int32 x = 0; x < ctx->width; x++)
+				if(top->depth == 32)
+					((uint32*)row)[x] = pixel;
+				else
+					((uint16*)row)[x] = (uint16)pixel;
+		}
+		top->unlock(0);
+		return 1;
+		}
+	}
+	return 0;
+}
+
+static float
+texGain(void)
+{
+	// the textured Im2D pixel shader multiplies texture * diffuse by c2.x (2 = D3DTOP_MODULATE2X); RW's raster blit
+	// uses D3DTOP_SELECTARG1 TEXTURE, so the diffuse that gives texture * 1 is 1/gain
+	static float g = -1.0f;
+	if(g < 0.0f) g = getenv("PORT_NOMODULATE2X") ? 1.0f : 2.0f;
+	return g;
+}
+
+// rect: destination (x, y [, w, h when scaled]) relative to the context raster.
+bool32
+rasterContextRender(Raster *src, Rect *rect, bool32 scaled, bool32 alpha)
+{
+	Raster *ctx = Raster::getCurrentContext();
+	if(ctx == nil || src == nil)
+		return 0;
+	Raster *dtop = ctx->parent ? ctx->parent : ctx;
+	Raster *stop = src->parent ? src->parent : src;
+	if(dtop->type != Raster::CAMERA && dtop->type != Raster::CAMERATEXTURE)
+		return 0;	// RW also copies between texture rasters; not implemented, no caller needs it
+	if(stop->type == Raster::ZBUFFER)
+		return 0;
+	ContextTarget t;
+	if(!beginContext(ctx, &t))
+		return 0;
+	bool32 ret = 1;
+
+	if(stop->type == Raster::CAMERA){
+		// device back buffer -> context target (no scaling)
+		RECT rs = { src->offsetX, src->offsetY, src->offsetX + src->width, src->offsetY + src->height };
+		RECT rd = { ctx->offsetX + rect->x, ctx->offsetY + rect->y, 0, 0 };
+		rd.right = rd.left + (scaled ? rect->w : src->width);
+		rd.bottom = rd.top + (scaled ? rect->h : src->height);
+		IDirect3DSurface9 *ss = d3d9Globals.defaultRenderTarget;
+		if(ss != t.surf)
+			ret = SUCCEEDED(d3ddevice->StretchRect(ss, &rs, t.surf, &rd, scaled ? D3DTEXF_LINEAR : D3DTEXF_NONE));
+		endContext(&t);
+		return ret;
+	}
+
+	D3dRaster *nat = GETD3DRASTEREXT(stop);
+	if(nat->texture == nil){
+		endContext(&t);
+		return 0;
+	}
+	D3DVIEWPORT9 vp = { (DWORD)ctx->offsetX, (DWORD)ctx->offsetY, (DWORD)ctx->width, (DWORD)ctx->height, 0.0f, 1.0f };
+	d3ddevice->SetViewport(&vp);
+
+	float x0 = (float)rect->x, y0 = (float)rect->y;
+	float x1 = x0 + (scaled ? rect->w : src->width), y1 = y0 + (scaled ? rect->h : src->height);
+	float u0 = (float)src->offsetX/stop->width, v0 = (float)src->offsetY/stop->height;
+	float u1 = (float)(src->offsetX + src->width)/stop->width, v1 = (float)(src->offsetY + src->height)/stop->height;
+	uint32 col = texGain() == 2.0f ? 0xFF808080 : 0xFFFFFFFF;
+	Im2DVertex v[4] = {
+		{ x0, y0, 0.0f, 1.0f, col, u0, v0 },
+		{ x0, y1, 0.0f, 1.0f, col, u0, v1 },
+		{ x1, y0, 0.0f, 1.0f, col, u1, v0 },
+		{ x1, y1, 0.0f, 1.0f, col, u1, v1 },
+	};
+
+	// render state saved and restored around the blit
+	uint32 oSrc = GetRenderState(SRCBLEND), oDst = GetRenderState(DESTBLEND), oVA = GetRenderState(VERTEXALPHA);
+	uint32 oFog = GetRenderState(FOGENABLE), oFilt = GetRenderState(TEXTUREFILTER);
+	uint32 oAU = GetRenderState(TEXTUREADDRESSU), oAV = GetRenderState(TEXTUREADDRESSV);
+	uint32 oZT = GetRenderState(ZTESTENABLE), oZW = GetRenderState(ZWRITEENABLE), oCull = GetRenderState(CULLMODE);
+	void *oRas = GetRenderStatePtr(TEXTURERASTER);
+
+	bool began = SUCCEEDED(d3ddevice->BeginScene());	
+	SetRenderStatePtr(TEXTURERASTER, stop);
+	if(alpha && nat->hasAlpha){
+		SetRenderState(VERTEXALPHA, 1);
+		SetRenderState(SRCBLEND, BLENDSRCALPHA);
+		SetRenderState(DESTBLEND, BLENDINVSRCALPHA);
+	}else
+		SetRenderState(VERTEXALPHA, 0);
+	SetRenderState(FOGENABLE, 0);
+	SetRenderState(TEXTUREFILTER, scaled ? Texture::LINEAR : Texture::NEAREST);
+	SetRenderState(TEXTUREADDRESS, Texture::CLAMP);
+	SetRenderState(ZTESTENABLE, 0);
+	SetRenderState(ZWRITEENABLE, 0);
+	SetRenderState(CULLMODE, CULLNONE);
+	im2dXformW = (float)ctx->width;
+	im2dXformH = (float)ctx->height;
+	im2DRenderPrimitive(PRIMTYPETRISTRIP, v, 4);
+	im2dXformW = im2dXformH = 0.0f;
+	SetRenderState(ZTESTENABLE, oZT);
+	SetRenderState(ZWRITEENABLE, oZW);
+	SetRenderState(CULLMODE, oCull);
+	SetRenderState(SRCBLEND, oSrc);
+	SetRenderState(DESTBLEND, oDst);
+	SetRenderState(VERTEXALPHA, oVA);
+	SetRenderState(FOGENABLE, oFog);
+	SetRenderState(TEXTUREFILTER, oFilt);
+	SetRenderStatePtr(TEXTURERASTER, oRas);
+	SetRenderState(TEXTUREADDRESSU, oAU);
+	SetRenderState(TEXTUREADDRESSV, oAV);
+	if(began)
+		d3ddevice->EndScene();
+	endContext(&t);
+	return ret;
+}
+
+
 //
 // Device
 //

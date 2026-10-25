@@ -38,6 +38,8 @@ static IDirect3DVertexBuffer9 *im2dvertbuf;
 static IDirect3DIndexBuffer9 *im2dindbuf;
 
 void *im2dOverridePS;
+// pre-transformed coordinate range of a raster context blit (rasterContextRender); 0 = the current camera's frame buffer
+float im2dXformW, im2dXformH;
 
 void
 openIm2D(void)
@@ -107,8 +109,13 @@ im2DSetXform(void)
 	float xform[4];
 	Camera *cam;
 	cam = (Camera*)engine->currentCamera;
-	xform[0] = 2.0f/cam->frameBuffer->width;
-	xform[1] = -2.0f/cam->frameBuffer->height;
+	if(im2dXformW > 0.0f){
+		xform[0] = 2.0f/im2dXformW;
+		xform[1] = -2.0f/im2dXformH;
+	}else{
+		xform[0] = 2.0f/cam->frameBuffer->width;
+		xform[1] = -2.0f/cam->frameBuffer->height;
+	}
 	xform[2] = -1.0f;
 	xform[3] = 1.0f;
 	// TODO: should cache this...

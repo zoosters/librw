@@ -722,11 +722,49 @@ imageFindRasterFormat(Image *img, int32 type,
 	return 1;
 }
 
+// RwImageCreateResample for 24/32 bit images (bilinear; RW's filter differs in detail)
+static Image*
+resampleImage(Image *src, int32 w, int32 h)
+{
+	if((src->depth != 32 && src->depth != 24) || src->pixels == nil)
+		return nil;
+	Image *dst = Image::create(w, h, src->depth);
+	dst->allocate();
+	int bpp = src->depth/8;
+	for(int32 y = 0; y < h; y++){
+		float fy = (y + 0.5f)*src->height/h - 0.5f;
+		if(fy < 0.0f) fy = 0.0f;
+		int32 y0 = (int32)fy, y1 = y0 + 1 < src->height ? y0 + 1 : y0;
+		float ty = fy - y0;
+		for(int32 x = 0; x < w; x++){
+			float fx = (x + 0.5f)*src->width/w - 0.5f;
+			if(fx < 0.0f) fx = 0.0f;
+			int32 x0 = (int32)fx, x1 = x0 + 1 < src->width ? x0 + 1 : x0;
+			float tx = fx - x0;
+			for(int c = 0; c < bpp; c++){
+				float p00 = src->pixels[y0*src->stride + x0*bpp + c], p10 = src->pixels[y0*src->stride + x1*bpp + c];
+				float p01 = src->pixels[y1*src->stride + x0*bpp + c], p11 = src->pixels[y1*src->stride + x1*bpp + c];
+				float v = (p00*(1-tx) + p10*tx)*(1-ty) + (p01*(1-tx) + p11*tx)*ty;
+				dst->pixels[y*dst->stride + x*bpp + c] = (uint8)(v + 0.5f);
+			}
+		}
+	}
+	return dst;
+}
+
 bool32
 rasterFromImage(Raster *raster, Image *image)
 {
-	if((raster->type&0xF) != Raster::TEXTURE)
+	// as RW: also fill NORMAL rasters and resample an image of another size
+	if((raster->type&0xF) != Raster::TEXTURE && (raster->type&0xF) != Raster::NORMAL)
 		return 0;
+	Image *resampled = nil;
+	if(image->width != raster->width || image->height != raster->height){
+		resampled = resampleImage(image, raster->width, raster->height);
+		if(resampled == nil)
+			return 0;
+		image = resampled;
+	}
 
 	void (*conv)(uint8 *out, uint8 *in) = nil;
 
@@ -783,6 +821,8 @@ rasterFromImage(Raster *raster, Image *image)
 	err:
 fprintf(stderr, "%d %x\n", image->depth, format); fflush(stdout);
 		RWERROR((ERR_INVRASTER));
+		if(resampled)
+			resampled->destroy();
 		return 0;
 	}
 
@@ -831,6 +871,8 @@ fprintf(stderr, "%d %x\n", image->depth, format); fflush(stdout);
 
 	if(truecolimg)
 		truecolimg->destroy();
+	if(resampled)
+		resampled->destroy();
 
 	return 1;
 }

@@ -967,6 +967,64 @@ Image::getFilename(const char *name)
 	return nil;
 }
 
+// RwImageRead: the file name already has its extension (RwImageRead("x.png")); the text after the last
+// '.' selects the registered format reader and the file is looked up through the search path. Image::read below instead appends
+// every registered extension to the name.
+static int
+fileExtMatch(const char *name, const char *ext, const char **fmtext)
+{
+	const char *sep = name, *t;
+	if((t = strrchr(sep, ':'))) sep = t;
+	if((t = strrchr(sep, '/'))) sep = t;
+	if((t = strrchr(sep, '\\'))) sep = t;
+	const char *dot = strrchr(sep, '.');
+	if(dot == nil)
+		return 0;
+	*fmtext = dot+1;
+	const char *a = dot+1, *b = ext;
+	for(; *a && *b; a++, b++)
+		if((*a | 0x20) != (*b | 0x20))
+			return 0;
+	return *a == 0 && *b == 0;
+}
+
+Image*
+Image::readFile(const char *imageName)
+{
+	const char *e;
+	for(int i = 0; i < IMAGEGLOBAL(numFileFormats); i++){
+		if(IMAGEGLOBAL(fileFormats)[i].read == nil ||
+		   !fileExtMatch(imageName, IMAGEGLOBAL(fileFormats)[i].extension, &e))
+			continue;
+		char *found = getFilename(imageName);
+		if(found == nil)
+			return nil;
+		Image *img = IMAGEGLOBAL(fileFormats)[i].read(found);
+		rwFree(found);
+		return img;
+	}
+	return nil;
+}
+
+// RwImageWrite: no search path; nil/0 when the extension is unknown or the file cannot be written
+bool32
+Image::writeFile(const char *imageName)
+{
+	const char *e;
+	for(int i = 0; i < IMAGEGLOBAL(numFileFormats); i++){
+		if(IMAGEGLOBAL(fileFormats)[i].write == nil ||
+		   !fileExtMatch(imageName, IMAGEGLOBAL(fileFormats)[i].extension, &e))
+			continue;
+		FILE *f = fopen(imageName, "wb");	// the writers report a missing file only through the error hook
+		if(f == nil)
+			return 0;
+		fclose(f);
+		IMAGEGLOBAL(fileFormats)[i].write(this, imageName);
+		return 1;
+	}
+	return 0;
+}
+
 Image*
 Image::readMasked(const char *imageName, const char *maskName)
 {

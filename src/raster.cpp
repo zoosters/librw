@@ -18,6 +18,13 @@
 
 #define PLUGIN_ID 0
 
+#ifdef RW_D3D9
+namespace rw { namespace d3d {
+bool32 rasterContextClear(uint32 pixel);
+bool32 rasterContextRender(Raster *src, Rect *rect, bool32 scaled, bool32 alpha);
+}}
+#endif
+
 namespace rw {
 
 int32 Raster::numAllocated;
@@ -215,6 +222,29 @@ Raster::getCurrentContext(void)
 	if(g->sp < 0 || g->sp >= (int32)nelem(g->stack))
 		return nil;
 	return g->stack[g->sp];
+}
+
+// RwRasterClear / RwRasterRenderFast / RwRasterRenderScaled. They act on the raster given to
+// pushContext; only the d3d9 backend has a device target to draw into.
+bool32
+Raster::contextClear(uint32 pixel)
+{
+#ifdef RW_D3D9
+	if(rw::platform == PLATFORM_D3D9)
+		return d3d::rasterContextClear(pixel);
+#endif
+	return getCurrentContext() != nil;
+}
+
+bool32
+Raster::contextRender(Rect *rect, bool32 scaled, bool32 alpha)
+{
+#ifdef RW_D3D9
+	if(rw::platform == PLATFORM_D3D9)
+		return d3d::rasterContextRender(this, rect, scaled, alpha);
+#endif
+	(void)rect; (void)scaled; (void)alpha;
+	return getCurrentContext() != nil;
 }
 
 bool32

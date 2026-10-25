@@ -156,6 +156,9 @@ struct Image
 	static void printSearchPath(void);
 	static char *getFilename(const char*);
 	static Image *read(const char *imageName);
+	// RwImageRead / RwImageWrite: the name carries the extension, which selects the format
+	static Image *readFile(const char *imageName);
+	bool32 writeFile(const char *imageName);
 	static Image *readMasked(const char *imageName, const char *maskName);
 
 
@@ -271,6 +274,9 @@ struct Raster
 	static Raster *popContext(void);
 	static Raster *getCurrentContext(void);
 	bool32 renderFast(int32 x, int32 y);
+	// RwRasterClear / RwRasterRenderFast (alpha) / RwRasterRenderScaled into the pushed context raster
+	static bool32 contextClear(uint32 pixel);
+	bool32 contextRender(Rect *rect, bool32 scaled, bool32 alpha);
 
 	static Raster *convertTexToCurrentPlatform(Raster *ras);
 #ifndef RWPUBLIC
