@@ -54,6 +54,7 @@ Geometry::allocateMeshes(int32 numMeshes, uint32 numIndices, bool32 noIndices)
 	mh->numMeshes = numMeshes;
 	mh->serialNum = nextSerialNum++;
 	mh->totalIndices = numIndices;
+	mh->pad = 0;		// RW's firstMeshOffset: RW-compiled mesh code adds it to find the meshes
 	m = mh->getMeshes();
 	indices = (uint16*)&m[numMeshes];
 	for(i = 0; i < mh->numMeshes; i++){
