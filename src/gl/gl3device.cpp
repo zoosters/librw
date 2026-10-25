@@ -1472,7 +1472,7 @@ getFramebufferRect(Raster *frameBuffer)
 #ifdef LIBRW_SDL2
 		SDL_GetWindowSize(glGlobals.window, &r.w, &r.h);
 #elif defined(LIBRW_SDL3)
-		SDL_GetWindowSize(glGlobals.window, &r.w, &r.h);
+		SDL_GetWindowSizeInPixels(glGlobals.window, &r.w, &r.h);	// zoosters: the drawable in pixels (Retina / display scaling), as the camera raster
 #elif defined(LIBRW_GLFW)
 		glfwGetFramebufferSize(glGlobals.window, &r.w, &r.h);
 #else
