@@ -29,6 +29,7 @@ bool32 needToReadBackTextures;
 
 int32   alphaFunc;
 float32 alphaRef;
+static float32 alphaComplement = 0.0f;	// zoosters: 1 = alpha from 1 - texture alpha
 static float32 texGain = -1.0f;	// zoosters: 1 = textured draw (MODULATE2X), 0 = untextured
 
 struct UniformState
@@ -488,6 +489,17 @@ setFogRange(float32 start, float32 end)
 }
 
 void (*meshMaterialHook)(Material *material);
+
+void
+setAlphaComplement(bool32 on)
+{
+	float32 v = on ? 1.0f : 0.0f;
+	if(v != alphaComplement){
+		alphaComplement = v;
+		uniformStateDirty[RWGL_ALPHAFUNC] = true;
+		stateDirty = 1;
+	}
+}
 
 static void
 setVertexAlpha(bool32 enable)
@@ -1178,6 +1190,7 @@ flushCache(void)
 		case 107: alphaTest[0] = alphaRef; alphaTest[1] = 1000.0f; break;                      // GREATEREQUAL
 		}
 		alphaTest[2] = texGain;
+		alphaTest[3] = alphaComplement;
 		setUniform(u_alphaRef, alphaTest);
 		uniformStateDirty[RWGL_ALPHAFUNC] = false;
 		uniformStateDirty[RWGL_ALPHAREF] = false;

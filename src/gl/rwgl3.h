@@ -225,6 +225,8 @@ void setAlphaTestFuncRW(uint32 func);
 uint32 getAlphaTestFuncRW(void);
 // the D3D8 device fog range set by the application (pixel fog start / end); BeginUpdate loads the camera's fogPlane / farPlane again
 void setFogRange(float32 start, float32 end);
+// zoosters: alpha = vertex alpha * (1 - texture alpha) (D3D8 D3DTA_TEXTURE | D3DTA_COMPLEMENT; the shadow receiver pass)
+void setAlphaComplement(bool32 on);
 // per-mesh material callback, run first for every mesh by the default, MatFX and skin render callbacks
 extern void (*meshMaterialHook)(Material *material);
 

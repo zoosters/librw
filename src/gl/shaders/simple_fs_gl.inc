@@ -10,6 +10,7 @@ const char *simple_frag_src =
 "{\n"
 "	vec4 color = v_color*texture(tex0, vec2(v_tex0.x, 1.0-v_tex0.y));\n"
 "	color.rgb *= 1.0 + u_alphaRef.z;	// zoosters: MODULATE2X for textured draws\n"
+"	if(u_alphaRef.w > 0.5) color.a = v_color.a*(1.0 - texture(tex0, vec2(v_tex0.x, 1.0-v_tex0.y)).a);	// zoosters: complement alpha\n"
 "	color.rgb = mix(u_fogColor.rgb, color.rgb, v_fog);\n"
 "	DoAlphaTest(color.a);\n"
 "	FRAGCOLOR(color);\n"
