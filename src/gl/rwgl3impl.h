@@ -50,6 +50,7 @@ struct GlGlobals
 	SDL_Window **pWindow;
 	SDL_Window *window;
 	SDL_GLContext glcontext;
+	bool32 ownWindow;	// zoosters: 0 = the application passed its own window
 
 	int numDisplays;
 	int currentDisplay;

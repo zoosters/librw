@@ -1731,6 +1731,28 @@ startSDL3(void)
 	SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, glGlobals.numSamples);
 
 	int i;
+	// zoosters: the application made the window (SDL_WINDOW_OPENGL) and passes it in *openparams->window: create the context on it,
+	// trying the profiles in order; the window stays the application's (stopSDL3 does not destroy it)
+	glGlobals.ownWindow = *glGlobals.pWindow == nil;
+	if(!glGlobals.ownWindow){
+		win = *glGlobals.pWindow;
+		ctx = nil;
+		for(i = 0; profiles[i].gl && ctx == nil; i++){
+			SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, profiles[i].gl);
+			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, profiles[i].major);
+			SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, profiles[i].minor);
+			ctx = SDL_GL_CreateContext(win);
+			if(ctx){
+				gl3Caps.gles = profiles[i].gl == SDL_GL_CONTEXT_PROFILE_ES;
+				gl3Caps.glversion = profiles[i].major*10 + profiles[i].minor;
+			}
+		}
+		if(ctx == nil){
+			RWERROR((ERR_GENERAL, SDL_GetError()));
+			return 0;
+		}
+		goto haveContext;
+	}
 	for(i = 0; profiles[i].gl; i++){
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, profiles[i].gl);
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, profiles[i].major);
@@ -1759,11 +1781,13 @@ startSDL3(void)
 		return 0;
 	}
 	ctx = SDL_GL_CreateContext(win);
+haveContext:
 
 	if (!((gl3Caps.gles ? gladLoadGLES2Loader : gladLoadGLLoader) ((GLADloadproc) SDL_GL_GetProcAddress, gl3Caps.glversion)) ) {
 		RWERROR((ERR_GENERAL, "gladLoadGLLoader failed"));
 		SDL_GL_DestroyContext(ctx);
-		SDL_DestroyWindow(win);
+		if(glGlobals.ownWindow)
+			SDL_DestroyWindow(win);
 		return 0;
 	}
 
@@ -1783,7 +1807,8 @@ static int
 stopSDL3(void)
 {
 	SDL_GL_DestroyContext(glGlobals.glcontext);
-	SDL_DestroyWindow(glGlobals.window);
+	if(glGlobals.ownWindow)
+		SDL_DestroyWindow(glGlobals.window);
 	return 1;
 }
 #elif defined(LIBRW_GLFW)
