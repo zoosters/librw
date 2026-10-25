@@ -145,7 +145,9 @@ TexDictionary::add(Texture *t)
 	if(t->dict)
 		t->inDict.remove();
 	t->dict = this;
-	this->textures.append(&t->inDict);
+	// RwTexDictionaryAddTexture links at the head: newest first, so a later texture of the same name is
+	// found first and ForAllTextures runs newest to oldest
+	this->textures.add(&t->inDict);
 }
 
 void
@@ -305,7 +307,12 @@ defaultFindCB(const char *name)
 {
 	if(TEXTUREGLOBAL(currentTexDict))
 		return TEXTUREGLOBAL(currentTexDict)->find(name);
-	// TODO: RW searches *all* TXDs otherwise
+	// TextureDefaultFind: without a current dictionary RW searches all of them, newest first
+	FORLIST(lnk, TEXTUREGLOBAL(texDicts)){
+		Texture *tex = TexDictionary::fromLink(lnk)->find(name);
+		if(tex)
+			return tex;
+	}
 	return nil;
 }
 

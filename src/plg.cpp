@@ -57,7 +57,8 @@ PluginList::construct(void *object)
 void
 PluginList::destruct(void *object)
 {
-	FORLIST(lnk, this->plugins){
+	// the plugin destructors run backwards, last registered first
+	for(LLLink *lnk = this->plugins.link.prev; lnk != this->plugins.end(); lnk = lnk->prev){
 		Plugin *p = PLG(lnk);
 		p->destructor(object, p->offset, p->size);
 	}

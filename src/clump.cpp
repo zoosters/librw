@@ -60,9 +60,8 @@ Clump::clone(void)
 	}
 	this->getFrame()->purgeClone();
 
-	// World extension
-	if(this->world)
-		this->world->addClump(clump);
+	// World extension: RpClumpClone leaves the clone out of every world (the caller adds it with RpWorldAddClump);
+	// librw's world->addClump here would link it twice
 
 	s_plglist.copy(clump, this);
 	return clump;
@@ -100,7 +99,9 @@ Clump::addAtomic(Atomic *a)
 {
 	assert(a->clump == nil);
 	a->clump = this;
-	this->atomics.append(&a->inClump);
+	// RW inserts at the list head: the atomic list is newest first, so ForAllAtomics (and Clump::render)
+	// visit atomics in reverse insertion order, as RpClumpAddAtomic does
+	this->atomics.add(&a->inClump);
 }
 
 void
@@ -116,7 +117,7 @@ Clump::addLight(Light *l)
 {
 	assert(l->clump == nil);
 	l->clump = this;
-	this->lights.append(&l->inClump);
+	this->lights.add(&l->inClump);	// head insert like RpClumpAddLight
 }
 
 void
@@ -132,7 +133,7 @@ Clump::addCamera(Camera *c)
 {
 	assert(c->clump == nil);
 	c->clump = this;
-	this->cameras.append(&c->inClump);
+	this->cameras.add(&c->inClump);	// head insert like RpClumpAddCamera
 }
 
 void
@@ -452,6 +453,10 @@ Atomic::clone()
 	atomic->object.object.privateFlags |= WORLDBOUNDDIRTY;
 	if(this->geometry)
 		atomic->setGeometry(this->geometry, 0);
+	// RpAtomicClone: the source's bounding sphere replaces the one derived from the geometry, and the interpolator is copied
+	// (rwInterpolator is the RW 3.6 interpolator block)
+	atomic->boundingSphere = this->boundingSphere;
+	memcpy(atomic->rwInterpolator, this->rwInterpolator, sizeof(atomic->rwInterpolator));
 	atomic->renderCB = this->renderCB;
 	atomic->pipeline = this->pipeline;
 

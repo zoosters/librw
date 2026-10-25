@@ -905,10 +905,11 @@ Material::destroy(void)
 void
 Material::setTexture(Texture *tex)
 {
-	if(this->texture)
-		this->texture->destroy();
+	// RpMaterialSetTexture: reference the new texture first, in case it is the old one
 	if(tex)
 		tex->addRef();
+	if(this->texture)
+		this->texture->destroy();
 	this->texture = tex;
 }
 
