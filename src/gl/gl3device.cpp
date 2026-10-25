@@ -1637,7 +1637,10 @@ clearCamera(Camera *cam, RGBA *col, uint32 mode)
 		mask |= GL_STENCIL_BUFFER_BIT;
 	glDepthMask(GL_TRUE);
 	glClear(mask);
-	glDepthMask(rwStateCache.zwrite);
+	// zoosters: restore the mask the GL state cache believes is set (oldGlState), not the RW-level zwrite: with a pending
+	// zwrite change the two differ, the next flush then saw "no change" and depth writes stayed on (a z-write-off
+	// background quad filled the depth buffer at the near plane and hid the world)
+	glDepthMask(oldGlState.depthMask);
 
 	if(setScissor)
 		glDisable(GL_SCISSOR_TEST);
