@@ -231,6 +231,11 @@ void setAlphaComplement(bool32 on);
 extern void (*meshMaterialHook)(Material *material);
 
 void bindFramebuffer(uint32 fbo);
+// zoosters: RwRasterClear / RwRasterRender* on the raster given to Raster::pushContext, as on d3d9
+bool32 rasterContextClear(uint32 pixel);
+bool32 rasterContextRender(Raster *src, Rect *rect, bool32 scaled, bool32 alpha);
+// zoosters: the Im2D pixel range of a context blit (0 = the current camera's frame buffer)
+extern float32 im2dXformW, im2dXformH;
 uint32 bindTexture(uint32 texid);
 
 void flushCache(void);

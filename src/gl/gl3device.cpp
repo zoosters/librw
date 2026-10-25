@@ -542,6 +542,164 @@ bindFramebuffer(uint32 fbo)
 	}
 }
 
+// zoosters: raster context operations, see rwgl3.h
+float32 im2dXformW, im2dXformH;
+
+static Rect getFramebufferRect(Raster *frameBuffer);
+static void setViewport(Raster *frameBuffer);
+
+// the GL rectangle (y from the bottom) of a context raster inside its top raster
+static void
+contextGlRect(Raster *ctx, Raster *top, int32 *x, int32 *y, int32 *w, int32 *h)
+{
+	int32 topH = top->type == Raster::CAMERA ? getFramebufferRect(top).h : top->height;
+	*x = ctx->offsetX;
+	*w = ctx->width;
+	*h = ctx->height;
+	*y = topH - ctx->offsetY - ctx->height;
+}
+
+bool32
+rasterContextClear(uint32 pixel)
+{
+	Raster *ctx = Raster::getCurrentContext();
+	if(ctx == nil)
+		return 0;
+	Raster *top = ctx->parent ? ctx->parent : ctx;
+	float32 a = (pixel>>24&0xFF)/255.0f, r = (pixel>>16&0xFF)/255.0f, g = (pixel>>8&0xFF)/255.0f, b = (pixel&0xFF)/255.0f;	// RW 8888 = A R G B
+	switch(top->type){
+	case Raster::CAMERA:
+	case Raster::CAMERATEXTURE: {
+		Gl3Raster *nat = PLUGINOFFSET(Gl3Raster, top, nativeRasterOffset);
+		uint32 prev = currentFramebuffer;
+		int32 x, y, w, h;
+		contextGlRect(ctx, top, &x, &y, &w, &h);
+		bindFramebuffer(nat->fbo);
+		glScissor(x, y, w, h);
+		glEnable(GL_SCISSOR_TEST);
+		glClearColor(r, g, b, a);
+		glClear(GL_COLOR_BUFFER_BIT);
+		glDisable(GL_SCISSOR_TEST);
+		bindFramebuffer(prev);
+		return 1;
+		}
+	case Raster::NORMAL:
+	case Raster::TEXTURE: {
+		// fill the pixels through a lock (gl3 rows are bottom-up, bytes R G B [A])
+		Gl3Raster *nat = PLUGINOFFSET(Gl3Raster, top, nativeRasterOffset);
+		if(nat->bpp != 4 && nat->bpp != 3)
+			return 0;
+		uint8 *pix = top->lock(0, Raster::LOCKWRITE);
+		if(pix == nil)
+			return 0;
+		uint8 c[4] = { (uint8)(pixel>>16), (uint8)(pixel>>8), (uint8)pixel, (uint8)(pixel>>24) };
+		for(int32 yy = 0; yy < ctx->height; yy++){
+			uint8 *row = pix + (top->height - 1 - (ctx->offsetY + yy))*top->stride + ctx->offsetX*nat->bpp;
+			for(int32 xx = 0; xx < ctx->width; xx++)
+				memcpy(row + xx*nat->bpp, c, nat->bpp);
+		}
+		top->unlock(0);
+		return 1;
+		}
+	}
+	return 0;
+}
+
+bool32
+rasterContextRender(Raster *src, Rect *rect, bool32 scaled, bool32 alpha)
+{
+	Raster *ctx = Raster::getCurrentContext();
+	if(ctx == nil || src == nil)
+		return 0;
+	Raster *dtop = ctx->parent ? ctx->parent : ctx;
+	Raster *stop = src->parent ? src->parent : src;
+	if(dtop->type != Raster::CAMERA && dtop->type != Raster::CAMERATEXTURE)
+		return 0;	// RW also copies between texture rasters; not implemented, no caller needs it
+	if(stop->type == Raster::ZBUFFER)
+		return 0;
+	Gl3Raster *dnat = PLUGINOFFSET(Gl3Raster, dtop, nativeRasterOffset);
+	uint32 prev = currentFramebuffer;
+	int32 cx, cy, cw, ch;
+	contextGlRect(ctx, dtop, &cx, &cy, &cw, &ch);
+	int32 dw = scaled ? rect->w : src->width, dh = scaled ? rect->h : src->height;
+
+	if(stop->type == Raster::CAMERA){
+		// the window's back buffer -> context target
+		int32 sx, sy, sw, sh;
+		contextGlRect(src, stop, &sx, &sy, &sw, &sh);
+		int32 dx0 = cx + rect->x, dy1 = cy + ch - rect->y;	// GL y from the bottom
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dnat->fbo);
+		glBlitFramebuffer(sx, sy, sx + sw, sy + sh, dx0, dy1 - dh, dx0 + dw, dy1, GL_COLOR_BUFFER_BIT, scaled ? GL_LINEAR : GL_NEAREST);
+		glBindFramebuffer(GL_FRAMEBUFFER, prev);
+		currentFramebuffer = prev;
+		return 1;
+	}
+
+	Gl3Raster *snat = PLUGINOFFSET(Gl3Raster, stop, nativeRasterOffset);
+	if(snat->texid == 0)
+		return 0;
+	bindFramebuffer(dnat->fbo);
+	glViewport(cx, cy, cw, ch);
+	glGlobals.presentWidth = 0;	// the next setViewport sets its own again
+	glGlobals.presentHeight = 0;
+
+	float32 x0 = (float32)rect->x, y0 = (float32)rect->y, x1 = x0 + dw, y1 = y0 + dh;
+	float32 u0 = (float32)src->offsetX/stop->width, v0 = (float32)src->offsetY/stop->height;
+	float32 u1 = (float32)(src->offsetX + src->width)/stop->width, v1 = (float32)(src->offsetY + src->height)/stop->height;
+	uint8 c = getenv("PORT_NOMODULATE2X") ? 255 : 128;	// SELECTARG1 TEXTURE under the MODULATE2X shader: diffuse 1/2
+	Im2DVertex v[4];
+	float32 xs[4] = { x0, x0, x1, x1 }, ys[4] = { y0, y1, y0, y1 }, us[4] = { u0, u0, u1, u1 }, vs[4] = { v0, v1, v0, v1 };
+	for(int i = 0; i < 4; i++){
+		v[i].setScreenX(xs[i]);
+		v[i].setScreenY(ys[i]);
+		v[i].setScreenZ(-1.0f);
+		v[i].setCameraZ(1.0f);
+		v[i].setRecipCameraZ(1.0f);
+		v[i].setColor(c, c, c, 255);
+		v[i].setU(us[i], 1.0f);
+		v[i].setV(vs[i], 1.0f);
+	}
+
+	uint32 oSrc = GetRenderState(SRCBLEND), oDst = GetRenderState(DESTBLEND), oVA = GetRenderState(VERTEXALPHA);
+	uint32 oFog = GetRenderState(FOGENABLE), oFilt = GetRenderState(TEXTUREFILTER);
+	uint32 oAU = GetRenderState(TEXTUREADDRESSU), oAV = GetRenderState(TEXTUREADDRESSV);
+	uint32 oZT = GetRenderState(ZTESTENABLE), oZW = GetRenderState(ZWRITEENABLE), oCull = GetRenderState(CULLMODE);
+	void *oRas = GetRenderStatePtr(TEXTURERASTER);
+	SetRenderStatePtr(TEXTURERASTER, stop);
+	if(alpha && snat->hasAlpha){
+		SetRenderState(VERTEXALPHA, 1);
+		SetRenderState(SRCBLEND, BLENDSRCALPHA);
+		SetRenderState(DESTBLEND, BLENDINVSRCALPHA);
+	}else
+		SetRenderState(VERTEXALPHA, 0);
+	SetRenderState(FOGENABLE, 0);
+	SetRenderState(TEXTUREFILTER, scaled ? Texture::LINEAR : Texture::NEAREST);
+	SetRenderState(TEXTUREADDRESS, Texture::CLAMP);
+	SetRenderState(ZTESTENABLE, 0);
+	SetRenderState(ZWRITEENABLE, 0);
+	SetRenderState(CULLMODE, CULLNONE);
+	im2dXformW = (float32)ctx->width;
+	im2dXformH = (float32)ctx->height;
+	im2DRenderPrimitive(PRIMTYPETRISTRIP, v, 4);
+	im2dXformW = im2dXformH = 0.0f;
+	SetRenderState(ZTESTENABLE, oZT);
+	SetRenderState(ZWRITEENABLE, oZW);
+	SetRenderState(CULLMODE, oCull);
+	SetRenderState(SRCBLEND, oSrc);
+	SetRenderState(DESTBLEND, oDst);
+	SetRenderState(VERTEXALPHA, oVA);
+	SetRenderState(FOGENABLE, oFog);
+	SetRenderState(TEXTUREFILTER, oFilt);
+	SetRenderStatePtr(TEXTURERASTER, oRas);
+	SetRenderState(TEXTUREADDRESSU, oAU);
+	SetRenderState(TEXTUREADDRESSV, oAV);
+	bindFramebuffer(prev);
+	if(engine->currentCamera)
+		setViewport(((Camera*)engine->currentCamera)->frameBuffer);
+	return 1;
+}
+
 static GLint filterConvMap_NoMIP[] = {
 	0, GL_NEAREST, GL_LINEAR,
 	   GL_NEAREST, GL_LINEAR,

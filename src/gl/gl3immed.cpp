@@ -117,16 +117,19 @@ im2DSetXform(void)
 	GLfloat xform[4];
 	Camera *cam;
 	cam = (Camera*)engine->currentCamera;
-	xform[0] = 2.0f/cam->frameBuffer->width;
-	xform[1] = -2.0f/cam->frameBuffer->height;
+	// zoosters: a raster context blit draws in the context's pixel range
+	float32 fbw = im2dXformW > 0.0f ? im2dXformW : (float32)cam->frameBuffer->width;
+	float32 fbh = im2dXformH > 0.0f ? im2dXformH : (float32)cam->frameBuffer->height;
+	xform[0] = 2.0f/fbw;
+	xform[1] = -2.0f/fbh;
 	xform[2] = -1.0f;
 	xform[3] = 1.0f;
 	{	// zoosters: D3D pixel centres (integer screen coordinates) -> GL's (+0.5), see beginUpdate
 		static int on = -1;
 		if(on < 0) on = getenv("PORT_GL_NOHALFPIXEL") == nil;
 		if(on){
-			xform[2] += 1.0f/cam->frameBuffer->width;
-			xform[3] -= 1.0f/cam->frameBuffer->height;
+			xform[2] += 1.0f/fbw;
+			xform[3] -= 1.0f/fbh;
 		}
 	}
 	setUniform(u_xform, xform);

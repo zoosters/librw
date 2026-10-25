@@ -233,6 +233,10 @@ Raster::contextClear(uint32 pixel)
 	if(rw::platform == PLATFORM_D3D9)
 		return d3d::rasterContextClear(pixel);
 #endif
+#ifdef RW_GL3
+	if(rw::platform == PLATFORM_GL3)
+		return gl3::rasterContextClear(pixel);	// zoosters
+#endif
 	return getCurrentContext() != nil;
 }
 
@@ -242,6 +246,10 @@ Raster::contextRender(Rect *rect, bool32 scaled, bool32 alpha)
 #ifdef RW_D3D9
 	if(rw::platform == PLATFORM_D3D9)
 		return d3d::rasterContextRender(this, rect, scaled, alpha);
+#endif
+#ifdef RW_GL3
+	if(rw::platform == PLATFORM_GL3)
+		return gl3::rasterContextRender(this, rect, scaled, alpha);	// zoosters
 #endif
 	(void)rect; (void)scaled; (void)alpha;
 	return getCurrentContext() != nil;
