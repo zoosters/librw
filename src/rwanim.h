@@ -79,10 +79,19 @@ struct AnimInterpolator
 	Animation *currentAnim;
 	float32    currentTime;
 	void      *nextFrame;
+	// RW 3.6 layout: the RtAnimInterpolator callback fields, so that maxInterpKeyFrameSize is at +0x20
+	void      *rwAnimCallBack;
+	void      *rwAnimCallBackData;
+	float32    rwAnimCallBackTime;
+	void      *rwAnimLoopCallBack;
+	void      *rwAnimLoopCallBackData;
 	int32      maxInterpKeyFrameSize;
 	int32      currentInterpKeyFrameSize;
 	int32      currentAnimKeyFrameSize;
 	int32      numNodes;
+	int32      rwIsSubInterpolator;
+	int32      rwOffsetInParent;
+	void      *rwParentAnimation;
 	// TODO some callbacks, parent/sub
 	// cached from the InterpolatorInfo
 	AnimInterpolatorInfo::ApplyCB    applyCB;
