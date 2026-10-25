@@ -206,6 +206,16 @@ AnimInterpolator::create(int32 numNodes, int32 maxFrameSize)
 	interp->currentInterpKeyFrameSize = maxFrameSize;
 	interp->currentAnimKeyFrameSize = -1;
 	interp->numNodes = numNodes;;
+	// the RW 3.6 RtAnimInterpolator fields, initialised as RtAnimInterpolatorCreate does:
+	// no callbacks, callback time -1, not a sub-interpolator, parent = itself
+	interp->rwAnimCallBack = nil;
+	interp->rwAnimCallBackData = nil;
+	interp->rwAnimCallBackTime = -1.0f;
+	interp->rwAnimLoopCallBack = nil;
+	interp->rwAnimLoopCallBackData = nil;
+	interp->rwIsSubInterpolator = 0;
+	interp->rwOffsetInParent = 0;
+	interp->rwParentAnimation = interp;
 
 	return interp;
 }

@@ -41,6 +41,7 @@ HAnimHierarchy::create(int32 numNodes, int32 *nodeFlags, int32 *nodeIDs,
 	hier->flags = flags;
 	hier->parentFrame = nil;
 	hier->parentHierarchy = hier;
+	hier->rwRootParentOffset = -1;	
 	if(hier->flags & NOMATRICES){
 		hier->matrices = nil;
 		hier->matricesUnaligned = nil;
@@ -69,8 +70,12 @@ void
 HAnimHierarchy::destroy(void)
 {
 	this->interpolator->destroy();
-	rwFree(this->matricesUnaligned);
-	rwFree(this->nodeInfo);
+	// RpHAnimHierarchyDestroy: a sub-hierarchy shares matrices and nodeInfo with its parent and frees neither
+	if(!(this->flags & SUBHIERARCHY)){
+		if(!(this->flags & NOMATRICES))
+			rwFree(this->matricesUnaligned);
+		rwFree(this->nodeInfo);
+	}
 	rwFree(this);
 }
 
@@ -358,6 +363,9 @@ hanimApplyCB(void *result, void *frame)
 	m->pos = f->t;
 }
 
+// the quaternion rule of RpHAnimKeyFrameInterpolate instead of slerp(): q2 is negated when
+// q1 . q2 < 0, the weights are linear (1 - a, a) when the dot is >= 0.999 (also > 1, which acosf turns into NaN: librw returned q1 unturned), else
+// sin(w * theta) / sin(theta); the result is not renormalised. Translation: t1 + (t2 - t1) * a.
 static void
 hanimInterpCB(void *vout, void *vin1, void *vin2, float32 t, void*)
 {
@@ -367,7 +375,20 @@ hanimInterpCB(void *vout, void *vin1, void *vin2, float32 t, void*)
 assert(t >= in1->time && t <= in2->time);
 	float32 a = (t - in1->time)/(in2->time - in1->time);
 	out->t =  lerp(in1->t, in2->t, a);
-	out->q = slerp(in1->q, in2->q, a);
+	Quat q1 = in1->q, q2 = in2->q;
+	float32 c = dot(q1, q2);
+	if(c < 0.0f){
+		c = -c;
+		q2 = negate(q2);
+	}
+	float32 w1 = 1.0f - a, w2 = a;
+	if(c < 0.999f){
+		float32 theta = acosf(c);
+		float32 inv = 1.0f/sinf(theta);
+		w1 = sinf(w1*theta)*inv;
+		w2 = sinf(a*theta)*inv;
+	}
+	out->q = add(scale(q1, w1), scale(q2, w2));
 }
 
 static void*
