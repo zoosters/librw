@@ -223,24 +223,27 @@ struct Raster
 	enum { FLIPWAITVSYNCH = 1 };
 
 	PLUGINBASE
-	int32 platform;
-
-	// TODO: use bytes
+	// RW 3.6 layout first (RW-compiled code reads width +0xc, height +0x10, depth +0x14, stride +0x18,
+	// cType +0x20, cFormat +0x23); the byte fields mirror type/flags/format (the application keeps them in sync)
+	Raster *parent;                       // +0x00
+	uint8 *pixels;                        // +0x04
+	uint8 *palette;                       // +0x08
+	int32 width, height, depth;           // +0x0c
+	int32 stride;                         // +0x18
+	int16 rwOffsetX, rwOffsetY;           // +0x1c
+	uint8 cType, cFlags, cPrivateFlags, cFormat;   // +0x20
+	// remember for locked rasters
+	uint8 *originalPixels;                // +0x24
+	int32 originalWidth;                  // +0x28
+	int32 originalHeight;                 // +0x2c
+	int32 originalStride;                 // +0x30
+	// librw's own fields
+	int32 platform;                       // +0x34
 	int32 type;
 	int32 flags;
 	int32 privateFlags;
 	int32 format;
-	int32 width, height, depth;
-	int32 stride;
-	uint8 *pixels;
-	uint8 *palette;
-	// remember for locked rasters
-	uint8 *originalPixels;
-	int32 originalWidth;
-	int32 originalHeight;
-	int32 originalStride;
 	// subraster
-	Raster *parent;
 	int32 offsetX, offsetY;
 
 	static int32 numAllocated;
@@ -428,11 +431,11 @@ struct SurfaceProperties
 struct Material
 {
 	PLUGINBASE
-	Texture *texture;
-	RGBA color;
-	SurfaceProperties surfaceProps;
-	Pipeline *pipeline;
-	int32 refCount;
+	Texture *texture;                     // +0x00 (RW 3.6 layout)
+	RGBA color;                           // +0x04
+	Pipeline *pipeline;                   // +0x08
+	SurfaceProperties surfaceProps;       // +0x0c
+	int32 refCount;                       // +0x18
 
 	static int32 numAllocated;
 
@@ -522,15 +525,15 @@ struct Geometry
 	int32 numMorphTargets;
 	int32 numTexCoordSets;
 
-	Triangle *triangles;
-	RGBA *colors;
-	TexCoords *texCoords[8];
+	// RW 3.6 layout (RW-compiled code reads matList +0x20, triangles +0x2c, morphTargets +0x5c)
+	MaterialList matList;                 // +0x20
+	Triangle *triangles;                  // +0x2c
+	RGBA *colors;                         // +0x30
+	TexCoords *texCoords[8];              // +0x34
 
-	MorphTarget *morphTargets;
-	MaterialList matList;
-
-	MeshHeader *meshHeader;
-	InstanceDataHeader *instData;
+	MeshHeader *meshHeader;               // +0x54
+	InstanceDataHeader *instData;         // +0x58
+	MorphTarget *morphTargets;            // +0x5c
 
 	int32 refCount;
 
@@ -620,15 +623,19 @@ struct Atomic
 		SAMEBOUNDINGSPHERE = 0x01
 	};
 
-	ObjectWithFrame object;
-	Geometry *geometry;
-	Sphere boundingSphere;
-	Sphere worldBoundingSphere;
-	Clump *clump;
-	LLLink inClump;
-	ObjPipeline *pipeline;
-	RenderCB renderCB;
-
+	// RW 3.6 layout (RW-compiled code reads geometry +0x18, clump +0x3c, renderCallBack +0x48)
+	ObjectWithFrame object;               // +0x00
+	void *rwRepEntry;                     // +0x14 (RW resource entry; unused)
+	Geometry *geometry;                   // +0x18
+	Sphere boundingSphere;                // +0x1c
+	Sphere worldBoundingSphere;           // +0x2c
+	Clump *clump;                         // +0x3c
+	LLLink inClump;                       // +0x40
+	RenderCB renderCB;                    // +0x48
+	uint8 rwInterpolator[0x14];           // +0x4c (RpInterpolator; unused)
+	uint32 rwRenderFrame;                 // +0x60
+	LinkList rwSectors;                   // +0x64 (llWorldSectorsInAtomic; unused)
+	ObjPipeline *pipeline;                // +0x6c
 	World *world;
 	ObjectWithFrame::Sync originalSync;
 
@@ -738,24 +745,23 @@ struct Camera
 	// return value of frustumTestSphere
 	enum { SPHEREOUTSIDE, SPHEREBOUNDARY, SPHEREINSIDE };
 
-	ObjectWithFrame object;
-	void (*beginUpdateCB)(Camera*);
-	void (*endUpdateCB)(Camera*);
-	V2d viewWindow;
-	V2d viewOffset;
-	float32 nearPlane, farPlane;
-	float32 fogPlane;
-	int32 projection;
-
-	Matrix viewMatrix;
-	float32 zScale, zShift;
-
-	FrustumPlane frustumPlanes[6];
-	V3d frustumCorners[8];
-	BBox frustumBoundBox;
-
-	Raster *frameBuffer;
-	Raster *zBuffer;
+	// RW 3.6 layout (RW-compiled code reads frameBuffer +0x60, zBuffer +0x64, near/far +0x80/+0x84)
+	ObjectWithFrame object;               // +0x00
+	int32 projection;                     // +0x14
+	void (*beginUpdateCB)(Camera*);       // +0x18
+	void (*endUpdateCB)(Camera*);         // +0x1c
+	Matrix viewMatrix;                    // +0x20
+	Raster *frameBuffer;                  // +0x60
+	Raster *zBuffer;                      // +0x64
+	V2d viewWindow;                       // +0x68
+	V2d recipViewWindow;                  // +0x70 (RW; set by the port shim, unused by librw)
+	V2d viewOffset;                       // +0x78
+	float32 nearPlane, farPlane;          // +0x80
+	float32 fogPlane;                     // +0x88
+	float32 zScale, zShift;               // +0x8c
+	FrustumPlane frustumPlanes[6];        // +0x94
+	BBox frustumBoundBox;                 // +0x10c
+	V3d frustumCorners[8];                // +0x124
 
 	// Device dependent view and projection matrices
 	// optional
@@ -807,10 +813,10 @@ struct Clump
 	Object object;
 	LinkList atomics;
 	LinkList lights;
-	LinkList cameras;
+	LinkList cameras;                     // +0x18
 
+	LLLink inWorld;                       // +0x20 (RW 3.6 layout)
 	World *world;
-	LLLink inWorld;
 
 	static int32 numAllocated;
 
