@@ -117,6 +117,7 @@ defaultRenderCB_Fix(Atomic *atomic, InstanceDataHeader *header)
 			d3d::setTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_CURRENT);
 			d3d::setTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_TEXTURE);
 		}else{
+			d3d::unbindTexture0();
 			d3d::setTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
 			d3d::setTextureStageState(0, D3DTSS_COLORARG1, D3DTA_CURRENT);
 			d3d::setTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
@@ -175,8 +176,10 @@ defaultRenderCB_Shader(Atomic *atomic, InstanceDataHeader *header)
 		if(m->texture){
 			d3d::setTexture(0, m->texture);
 			setPixelShader(default_tex_PS);
-		}else
+		}else{
+			d3d::unbindTexture0();	// binding no texture also resets the texture-alpha blend state
 			setPixelShader(default_PS);
+		}
 
 		drawInst(header, inst);
 		inst++;

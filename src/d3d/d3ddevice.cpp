@@ -566,6 +566,20 @@ setTexture(uint32 stage, Texture *tex)
 	setRasterStage(stage, tex->raster);
 }
 
+// a mesh whose material has no texture binds NULL on stage 0, as RW does for every mesh.
+// PORT_STALETEX=1 keeps librw's old behaviour (the previous mesh's texture and its alpha-blend state stay bound) for A/B runs.
+void
+unbindTexture0(void)
+{
+	static int stale = -1;
+	if(stale < 0){
+		const char *e = getenv("PORT_STALETEX");
+		stale = e && e[0] == '1';
+	}
+	if(!stale)
+		setTexture(0, nil);
+}
+
 void
 setD3dMaterial(D3DMATERIAL9 *mat9)
 {

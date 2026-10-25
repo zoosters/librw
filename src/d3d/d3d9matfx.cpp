@@ -58,8 +58,10 @@ matfxRender_Default(InstanceDataHeader *header, InstanceData *inst, int32 lightB
 	if(inst->material->texture){
 		d3d::setTexture(0, m->texture);
 		setPixelShader(default_tex_PS);
-	}else
+	}else{
+		d3d::unbindTexture0();	
 		setPixelShader(default_PS);
+	}
 
 	drawInst(header, inst);
 }
@@ -237,8 +239,10 @@ matfxRender_EnvMap(InstanceDataHeader *header, InstanceData *inst, int32 lightBi
 	if(inst->material->texture){
 		d3d::setTexture(0, m->texture);
 		setPixelShader(matfx_env_tex_PS);
-	}else
+	}else{
+		d3d::unbindTexture0();	
 		setPixelShader(matfx_env_PS);
+	}
 
 	SetRenderState(VERTEXALPHA, texAlpha || inst->vertexAlpha || m->color.alpha != 255);
 

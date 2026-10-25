@@ -322,8 +322,10 @@ skinRenderCB(Atomic *atomic, InstanceDataHeader *header)
 		if(inst->material->texture){
 			d3d::setTexture(0, m->texture);
 			setPixelShader(default_tex_PS);
-		}else
+		}else{
+			d3d::unbindTexture0();	
 			setPixelShader(default_PS);
+		}
 
 		drawInst(header, inst);
 		inst++;

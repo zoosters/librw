@@ -310,6 +310,7 @@ uint32 getAlphaTestFuncRW(void);
 extern void (*meshMaterialHook)(Material *material);
 
 void setTexture(uint32 stage, Texture *tex);
+void unbindTexture0(void);	// bind NULL on stage 0 (also resets the texture-alpha blend state)
 void setMaterial(const RGBA &color, const SurfaceProperties &surfaceprops, float extraSurfProp = 0.0f);
 inline void setMaterial(uint32 flags, const RGBA &color, const SurfaceProperties &surfaceprops, float extraSurfProp = 0.0f)
 {
