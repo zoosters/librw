@@ -158,7 +158,10 @@ im2DRenderPrimitive(PrimitiveType primType, void *vertices, int32 numVertices)
 	im2DSetXform();
 
 	flushCache();
+	// zoosters: screen-space winding as Direct3D sees it (y down): the y flip of the Im2D transform reverses it in GL
+	glFrontFace(GL_CW);
 	glDrawArrays(primTypeMap[primType], 0, numVertices);
+	glFrontFace(GL_CCW);
 #ifndef RW_GL_USE_VAOS
 	disableAttribPointers(im2dattribDesc, 3);
 #endif
@@ -192,8 +195,11 @@ im2DRenderIndexedPrimitive(PrimitiveType primType,
 	im2DSetXform();
 
 	flushCache();
+	// zoosters: screen-space winding as Direct3D sees it (y down): the y flip of the Im2D transform reverses it in GL
+	glFrontFace(GL_CW);
 	glDrawElements(primTypeMap[primType], numIndices,
 	               GL_UNSIGNED_SHORT, nil);
+	glFrontFace(GL_CCW);
 #ifndef RW_GL_USE_VAOS
 	disableAttribPointers(im2dattribDesc, 3);
 #endif
