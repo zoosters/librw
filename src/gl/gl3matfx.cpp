@@ -164,6 +164,8 @@ matfxRenderCB(Atomic *atomic, InstanceDataHeader *header)
 	int32 n = header->numMeshes;
 
 	while(n--){
+		if(gl3::meshMaterialHook)	// zoosters: per-mesh material callback, called first for every mesh
+			gl3::meshMaterialHook(inst->material);
 		MatFX *matfx = MatFX::get(inst->material);
 
 		if(matfx == nil)

@@ -266,6 +266,8 @@ skinRenderCB(Atomic *atomic, InstanceDataHeader *header)
 
 	while(n--){
 		m = inst->material;
+		if(gl3::meshMaterialHook)	// zoosters: per-mesh material callback, called first for every mesh
+			gl3::meshMaterialHook(m);
 
 		setMaterial(flags, m->color, m->surfaceProps);
 

@@ -29,6 +29,7 @@ bool32 needToReadBackTextures;
 
 int32   alphaFunc;
 float32 alphaRef;
+static float32 texGain = -1.0f;	// zoosters: 1 = textured draw (MODULATE2X), 0 = untextured
 
 struct UniformState
 {
@@ -456,6 +457,37 @@ setAlphaTestFunction(uint32 function)
 		}
 	}
 }
+
+// zoosters: RW state rules, see rwgl3.h
+void
+setAlphaTestFuncRW(uint32 func)
+{
+	if(func >= 1 && func <= 8)
+		setAlphaTestFunction(100 + func);
+}
+
+uint32
+getAlphaTestFuncRW(void)
+{
+	return rwStateCache.alphaFunc > 100 ? rwStateCache.alphaFunc - 100 : 0;
+}
+
+void
+setFogRange(float32 start, float32 end)
+{
+	if(rwStateCache.fogStart != start){
+		rwStateCache.fogStart = start;
+		uniformStateDirty[RWGL_FOGSTART] = true;
+		stateDirty = 1;
+	}
+	if(rwStateCache.fogEnd != end){
+		rwStateCache.fogEnd = end;
+		uniformStateDirty[RWGL_FOGEND] = true;
+		stateDirty = 1;
+	}
+}
+
+void (*meshMaterialHook)(Material *material);
 
 static void
 setVertexAlpha(bool32 enable)
@@ -920,9 +952,10 @@ getRenderState(int32 state)
 static void
 resetRenderState(void)
 {	
-	rwStateCache.alphaFunc = ALPHAGREATEREQUAL;
+	// zoosters: RW's defaults: GREATER, reference 0 (librw: GREATEREQUAL 10)
+	rwStateCache.alphaFunc = 105;
 	alphaFunc = 0;
-	alphaRef = 10.0f/255.0f;
+	alphaRef = 0.0f;
 	uniformStateDirty[RWGL_ALPHAREF] = true;
 	uniformState.fogDisable = 1.0f;
 	uniformState.fogStart = 0.0f;
@@ -1109,6 +1142,16 @@ flushCache(void)
 	uniformState.fogEnd = rwStateCache.fogEnd;
 	uniformState.fogRange = 1.0f/(rwStateCache.fogStart - rwStateCache.fogEnd);
 
+	{	// zoosters: D3DTOP_MODULATE2X of RW's D3D8 texture stage 0 (as on d3d9): textured draws get rgb * 2, untextured
+		// ones (the white texture) not; the shaders multiply by 1 + u_alphaRef.z. PORT_NOMODULATE2X=1 -> plain modulate.
+		static int noGain = -1;
+		if(noGain < 0) noGain = getenv("PORT_NOMODULATE2X") != nil;
+		float32 g = (!noGain && rwStateCache.texstage[0].raster) ? 1.0f : 0.0f;
+		if(g != texGain){
+			texGain = g;
+			uniformStateDirty[RWGL_ALPHAFUNC] = true;
+		}
+	}
 	if(uniformStateDirty[RWGL_ALPHAFUNC] || uniformStateDirty[RWGL_ALPHAREF]){
 		float alphaTest[4] = {};
 		switch(alphaFunc){
@@ -1125,7 +1168,16 @@ flushCache(void)
 			alphaTest[0] = -1000.0f;
 			alphaTest[1] = alphaRef;
 			break;
+		// zoosters: RW's alpha test functions; a = k/255 exactly, so half a step separates < from <=
+		case 101: alphaTest[0] = 1000.0f; alphaTest[1] = 1000.0f; break;                       // NEVER
+		case 102: alphaTest[0] = -1000.0f; alphaTest[1] = alphaRef; break;                     // LESS
+		case 103: alphaTest[0] = alphaRef; alphaTest[1] = alphaRef + 0.5f/255.0f; break;     // EQUAL
+		case 104: alphaTest[0] = -1000.0f; alphaTest[1] = alphaRef + 0.5f/255.0f; break;     // LESSEQUAL
+		case 105: alphaTest[0] = alphaRef + 0.5f/255.0f; alphaTest[1] = 1000.0f; break;      // GREATER
+		case 106: case 108: alphaTest[0] = -1000.0f; alphaTest[1] = 1000.0f; break;          // NOTEQUAL (approximated), ALWAYS
+		case 107: alphaTest[0] = alphaRef; alphaTest[1] = 1000.0f; break;                      // GREATEREQUAL
 		}
+		alphaTest[2] = texGain;
 		setUniform(u_alphaRef, alphaTest);
 		uniformStateDirty[RWGL_ALPHAFUNC] = false;
 		uniformStateDirty[RWGL_ALPHAREF] = false;

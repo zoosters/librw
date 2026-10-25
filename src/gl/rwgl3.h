@@ -218,6 +218,15 @@ void setAlphaBlend(bool32 enable);
 bool32 getAlphaBlend(void);
 
 bool32 getAlphaTest(void);
+// zoosters: RW D3D8 state rules on gl3, as on d3d9.
+// RW's alpha test function 1..8 (NEVER LESS EQUAL LESSEQUAL GREATER NOTEQUAL GREATEREQUAL ALWAYS); NOTEQUAL passes everything
+// (the shader test is one interval)
+void setAlphaTestFuncRW(uint32 func);
+uint32 getAlphaTestFuncRW(void);
+// the D3D8 device fog range set by the application (pixel fog start / end); BeginUpdate loads the camera's fogPlane / farPlane again
+void setFogRange(float32 start, float32 end);
+// per-mesh material callback, run first for every mesh by the default, MatFX and skin render callbacks
+extern void (*meshMaterialHook)(Material *material);
 
 void bindFramebuffer(uint32 fbo);
 uint32 bindTexture(uint32 texid);

@@ -51,6 +51,7 @@ const char *matfx_env_frag_src =
 "{\n"
 "	vec4 pass1 = v_color;\n"
 "	pass1 *= texture(tex0, vec2(v_tex0.x, 1.0-v_tex0.y));\n"
+"	pass1.rgb *= 1.0 + u_alphaRef.z;	// zoosters: MODULATE2X for textured draws\n"
 
 "	vec4 pass2 = v_envColor*shininess*texture(tex1, vec2(v_tex1.x, 1.0-v_tex1.y));\n"
 
