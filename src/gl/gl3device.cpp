@@ -1436,6 +1436,13 @@ setFrameBuffer(Camera *cam)
 			// all good
 			assert(natzb->fboMate == fbuf);
 		}else{
+			if(natfb->fboMate){
+				// zoosters: the frame buffer's previous z-buffer must forget it too (it kept a link to this
+				// raster, and destroying it after this raster was freed wrote into the freed memory)
+				Gl3Raster *oldzb = PLUGINOFFSET(Gl3Raster, natfb->fboMate, nativeRasterOffset);
+				if(oldzb->fboMate == fbuf)
+					oldzb->fboMate = nil;
+			}
 			if(natzb->fboMate){
 				// have to detatch from fbo first!
 				Gl3Raster *oldfb = PLUGINOFFSET(Gl3Raster, natzb->fboMate, nativeRasterOffset);
@@ -1459,6 +1466,12 @@ setFrameBuffer(Camera *cam)
 		// remove z-buffer
 		if(natfb->fboMate && natfb->fbo)
 			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+		if(natfb->fboMate){
+			// zoosters: unlink both sides (the z-buffer kept pointing at this frame buffer)
+			Gl3Raster *oldzb = PLUGINOFFSET(Gl3Raster, natfb->fboMate, nativeRasterOffset);
+			if(oldzb->fboMate == fbuf)
+				oldzb->fboMate = nil;
+		}
 		natfb->fboMate = nil;
 	}
 }

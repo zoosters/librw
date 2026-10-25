@@ -838,7 +838,8 @@ destroyNativeRaster(void *object, int32 offset, int32)
 		if(natras->fboMate){
 			// Break apart from currently associated zbuffer
 			Gl3Raster *zras = GETGL3RASTEREXT(natras->fboMate);
-			zras->fboMate = nil;
+			if(zras->fboMate == raster)	// zoosters: only a partner that still links back (links are kept symmetric)
+				zras->fboMate = nil;
 			natras->fboMate = nil;
 		}
 		glDeleteFramebuffers(1, &natras->fbo);
@@ -853,7 +854,8 @@ destroyNativeRaster(void *object, int32 offset, int32)
 				bindFramebuffer(oldfb->fbo);
 				glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
 			}
-			oldfb->fboMate = nil;
+			if(oldfb->fboMate == raster)	// zoosters
+				oldfb->fboMate = nil;
 		}
 		if(gl3Caps.gles)
 			glDeleteRenderbuffers(1, &natras->texid);
@@ -865,7 +867,8 @@ destroyNativeRaster(void *object, int32 offset, int32)
 		if(natras->fboMate){
 			// Break apart from currently associated zbuffer
 			Gl3Raster *zras = GETGL3RASTEREXT(natras->fboMate);
-			zras->fboMate = nil;
+			if(zras->fboMate == raster)	// zoosters: only a partner that still links back (links are kept symmetric)
+				zras->fboMate = nil;
 			natras->fboMate = nil;
 		}
 		break;
