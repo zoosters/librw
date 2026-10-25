@@ -561,7 +561,9 @@ static GLint addressConvMap[] = {
 static void
 setFilterMode(uint32 stage, int32 filter, int32 maxAniso = 1)
 {
-	if(rwStateCache.texstage[stage].filter != (Texture::FilterMode)filter){
+	// zoosters: the stage cache can already hold the value while a newly bound raster (setRasterStageOnly) still has other GL
+	// parameters: always reconcile the raster's own parameters
+	{
 		rwStateCache.texstage[stage].filter = (Texture::FilterMode)filter;
 		Raster *raster = rwStateCache.texstage[stage].raster;
 		if(raster){
@@ -589,12 +591,12 @@ setFilterMode(uint32 stage, int32 filter, int32 maxAniso = 1)
 static void
 setAddressU(uint32 stage, int32 addressing)
 {
-	if(rwStateCache.texstage[stage].addressingU != (Texture::Addressing)addressing){
+	{	// zoosters: reconcile the bound raster always (see setFilterMode); the test was inverted (== instead of !=)
 		rwStateCache.texstage[stage].addressingU = (Texture::Addressing)addressing;
 		Raster *raster = rwStateCache.texstage[stage].raster;
 		if(raster){
 			Gl3Raster *natras = PLUGINOFFSET(Gl3Raster, raster, nativeRasterOffset);
-			if(natras->addressU == addressing){
+			if(natras->addressU != addressing){
 				setActiveTexture(stage);
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, addressConvMap[addressing]);
 				natras->addressU = addressing;
@@ -606,12 +608,12 @@ setAddressU(uint32 stage, int32 addressing)
 static void
 setAddressV(uint32 stage, int32 addressing)
 {
-	if(rwStateCache.texstage[stage].addressingV != (Texture::Addressing)addressing){
+	{	// zoosters: reconcile the bound raster always (see setFilterMode); the test was inverted (== instead of !=)
 		rwStateCache.texstage[stage].addressingV = (Texture::Addressing)addressing;
 		Raster *raster = rwStateCache.texstage[stage].raster;
 		if(raster){
 			Gl3Raster *natras = PLUGINOFFSET(Gl3Raster, rwStateCache.texstage[stage].raster, nativeRasterOffset);
-			if(natras->addressV == addressing){
+			if(natras->addressV != addressing){
 				setActiveTexture(stage);
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, addressConvMap[addressing]);
 				natras->addressV = addressing;
