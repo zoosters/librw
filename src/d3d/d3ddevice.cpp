@@ -887,6 +887,11 @@ setPixelShader(void *ps)
 	if(deviceCache.pixelShader != ps){
 		deviceCache.pixelShader = (IDirect3DPixelShader9*)ps;
 		d3ddevice->SetPixelShader(deviceCache.pixelShader);
+		// c2.x = gain of the textured pixel shaders = 2 (D3DTOP_MODULATE2X, as RW's D3D8 texture stage 0 does);
+		// PORT_NOMODULATE2X=1 -> 1 (librw's plain modulate)
+		static float gain[4] = { -1.0f, 0.0f, 0.0f, 0.0f };
+		if(gain[0] < 0.0f) gain[0] = getenv("PORT_NOMODULATE2X") ? 1.0f : 2.0f;
+		d3ddevice->SetPixelShaderConstantF(2, gain, 1);
 	}
 }
 
