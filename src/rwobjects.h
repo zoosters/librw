@@ -47,9 +47,9 @@ struct Frame
 
 	Object object;
 	LLLink inDirtyList;
-	LinkList objectList;
 	Matrix matrix;
 	Matrix ltm;
+	LinkList objectList;
 
 	Frame *child;
 	Frame *next;
