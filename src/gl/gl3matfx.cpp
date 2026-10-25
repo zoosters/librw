@@ -26,6 +26,8 @@ namespace gl3 {
 
 static Shader *envShader, *envShader_noAT;
 static Shader *envShader_fullLight, *envShader_fullLight_noAT;
+static Shader *envPassShader;	// zoosters
+static Matrix *envLogWorld;	// zoosters: the atomic LTM of the mesh being drawn (PORT_ENVLOG only)
 static int32 u_texMatrix;
 static int32 u_fxparams;
 static int32 u_colorClamp;
@@ -92,14 +94,108 @@ uploadEnvMatrix(Frame *frame)
 	setUniform(u_texMatrix, &envMtx);
 }
 
+// zoosters: the env transform of RW 3.6's D3D8 MatFX, as on d3d9: camera space normals
+// transformed by [D * inv(envFrame LTM) * camera LTM] (frame given, D = negate the x row) * normal2texcoord, or by normal2texcoord alone when the env map has
+// no frame. The shader gets world normals, so the world -> camera space normal rotation (the D3D view matrix mirrors x) is prepended.
+static RawMatrix normal2texcoordRW = {
+	{ 0.5f,  0.0f, 0.0f }, 0.0f,
+	{ 0.0f, -0.5f, 0.0f }, 0.0f,
+	{ 0.0f,  0.0f, 1.0f }, 0.0f,
+	{ 0.5f,  0.5f, 0.0f }, 1.0f
+};
+
+static void
+uploadEnvMatrixRW(Frame *frame)
+{
+	Camera *cam = engine->currentCamera;
+	Matrix *camLTM = cam->getFrame()->getLTM();
+	Matrix viewRot;
+	Matrix::invert(&viewRot, camLTM);
+	viewRot.right.x = -viewRot.right.x;
+	viewRot.up.x = -viewRot.up.x;
+	viewRot.at.x = -viewRot.at.x;
+	viewRot.pos.set(0.0f, 0.0f, 0.0f);
+	Matrix A;
+	A.setIdentity();
+	if(frame){
+		Matrix invF;
+		Matrix::invert(&invF, frame->getLTM());
+		Matrix::mult(&A, &invF, camLTM);
+		A.right.x = -A.right.x;
+		A.right.y = -A.right.y;
+		A.right.z = -A.right.z;
+		A.pos.set(0.0f, 0.0f, 0.0f);
+	}
+	RawMatrix rv, ra, tmp, tot;
+	convMatrix(&rv, &viewRot);
+	convMatrix(&ra, &A);
+	RawMatrix::mult(&tmp, &rv, &ra);
+	RawMatrix::mult(&tot, &tmp, &normal2texcoordRW);
+	setUniform(u_texMatrix, &tot);
+}
+
+// zoosters: two passes like RW 3.6's D3D8 MatFX (generic path), as on d3d9:
+// pass 1 = the base mesh, pass 2 = the env texture, z write off, SRCALPHA / ONE blend, lighting off, colour = env texture * coefficient byte
+// (trunc(coefficient * 255) / 255), alpha = env texture alpha, fog colour black (ENVPASS in matfx_env.frag). Skipped when the byte is 0.
+// PORT_ENVONEPASS=1 keeps librw's combined one-draw version; PORT_ENVLOG=<file> logs the first 20 env passes, then every 500th, to that file.
 void
 matfxEnvRender(InstanceDataHeader *header, InstanceData *inst, int32 vsBits, uint32 flags, MatFX::Env *env)
 {
 	Material *m;
 	m = inst->material;
 
-	if(env->tex == nil || env->coefficient == 0.0f){
+	static int onePass = -1, envLogged = 0;
+	static const char *envLog = nil;
+	if(onePass < 0){
+		onePass = getenv("PORT_ENVONEPASS") ? 1 : 0;
+		envLog = getenv("PORT_ENVLOG");
+	}
+
+	int32 cbyte = env->tex ? (int32)(env->coefficient * 255.0f) : 0;
+	if(env->tex == nil || cbyte <= 0){
 		matfxDefaultRender(header, inst, vsBits, flags);
+		return;
+	}
+
+	if(!onePass){
+		// pass 1: base
+		matfxDefaultRender(header, inst, vsBits, flags);
+
+		// pass 2: environment map
+		uint32 oldSrc = GetRenderState(SRCBLEND), oldDst = GetRenderState(DESTBLEND);
+		uint32 oldZW = GetRenderState(ZWRITEENABLE), oldVA = GetRenderState(VERTEXALPHA);
+		setTexture(1, env->tex);
+		uploadEnvMatrixRW(env->frame);
+		rw::SetRenderState(VERTEXALPHA, 1);
+		rw::SetRenderState(SRCBLEND, BLENDSRCALPHA);
+		rw::SetRenderState(DESTBLEND, BLENDONE);
+		rw::SetRenderState(ZWRITEENABLE, 0);
+
+		float fxparams[4];
+		fxparams[0] = (cbyte > 255 ? 255 : cbyte) / 255.0f;
+		fxparams[1] = fxparams[2] = fxparams[3] = 0.0f;
+		setUniform(u_fxparams, fxparams);
+
+		envPassShader->use();
+		drawInst(header, inst);
+
+		if(envLog){
+			// first 20 env passes of the run, then every 500th (counted); appended to the file named by PORT_ENVLOG
+			envLogged++;
+			if(envLogged <= 20 || envLogged % 500 == 0){
+				FILE *lf = fopen(envLog, "a");
+				if(lf){
+					fprintf(lf, "envpass %d: tex %p coef %d/255 frame %p old src %u dst %u zw %u va %u world %.1f %.1f %.1f\n", envLogged, (void*)env->tex, cbyte,
+					        (void*)env->frame, oldSrc, oldDst, oldZW, oldVA, envLogWorld->pos.x, envLogWorld->pos.y, envLogWorld->pos.z);
+					fclose(lf);
+				}
+			}
+		}
+
+		rw::SetRenderState(ZWRITEENABLE, oldZW);
+		rw::SetRenderState(DESTBLEND, oldDst);
+		rw::SetRenderState(SRCBLEND, oldSrc);
+		rw::SetRenderState(VERTEXALPHA, oldVA);
 		return;
 	}
 
@@ -154,6 +250,7 @@ matfxRenderCB(Atomic *atomic, InstanceDataHeader *header)
 {
 	uint32 flags = atomic->geometry->flags;
 	setWorldMatrix(atomic->getFrame()->getLTM());
+	envLogWorld = atomic->getFrame()->getLTM();
 	int32 vsBits = lightingCB(atomic);
 
 	setupVertexInput(header);
@@ -216,6 +313,10 @@ matfxOpen(void *o, int32, int32)
 	envShader_fullLight_noAT = Shader::create(vs_fullLight, fs_noAT);
 	assert(envShader_fullLight_noAT);
 
+	const char *fs_envpass[] = { shaderDecl, "#define ENVPASS\n", header_frag_src, matfx_env_frag_src, nil };	// zoosters
+	envPassShader = Shader::create(vs, fs_envpass);
+	assert(envPassShader);
+
 	return o;
 }
 
@@ -233,6 +334,8 @@ matfxClose(void *o, int32, int32)
 	envShader_fullLight = nil;
 	envShader_fullLight_noAT->destroy();
 	envShader_fullLight_noAT = nil;
+	envPassShader->destroy();
+	envPassShader = nil;
 
 	return o;
 }

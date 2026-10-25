@@ -46,6 +46,20 @@ const char *matfx_env_frag_src =
 "FSIN vec2 v_tex1;\n"
 "FSIN float v_fog;\n"
 
+"#ifdef ENVPASS\n"
+"// zoosters: second pass of RW 3.6's D3D8 MatFX environment map (as matfx_envpass_PS): env texel * coefficient,\n"
+"// alpha = env texel alpha, additive pass (fog colour black), no vertex colour, no alpha test, no MODULATE2X\n"
+"void\n"
+"main(void)\n"
+"{\n"
+"	vec4 e = texture(tex1, vec2(v_tex1.x, 1.0-v_tex1.y));\n"
+"	vec4 color;\n"
+"	color.rgb = e.rgb*shininess*v_fog;\n"
+"	color.a = e.a;\n"
+"	FRAGCOLOR(color);\n"
+"}\n"
+"#else\n"
+
 "void\n"
 "main(void)\n"
 "{\n"
@@ -67,4 +81,5 @@ const char *matfx_env_frag_src =
 
 "	FRAGCOLOR(color);\n"
 "}\n"
+"#endif\n"
 ;
