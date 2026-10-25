@@ -688,6 +688,7 @@ struct Light
 	float32 radius;
 	RGBAf color;
 	float32 minusCosAngle;
+	LLLink rwSectorsInLight;	// +0x2c RW 3.6 layout: RW keeps the light's link in the world's list at +0x34
 	LLLink inWorld;
 
 	// clump extension
