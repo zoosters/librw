@@ -88,6 +88,9 @@ struct RwStateCache {
 	uint32 stencilwritemask;
 	uint32 alphafunc;
 	uint32 alpharef;
+	// alpha test: the RW function 1..8 (NEVER..ALWAYS) and the derived enable
+	uint32 alphafuncRW;
+	bool32 alphaTestEnable;
 
 	// emulation of PS2 GS
 	bool32 gsalpha;
@@ -414,19 +417,16 @@ evictD3D9Raster(Raster *raster)
 
 // RW render state
 
+// RW's z rules: ZENABLE = ztest || zwrite,
+// ZFUNC = LESSEQUAL while the test is on and ALWAYS while it is off
 static void
 setDepthTest(bool32 enable)
 {
 	if(rwStateCache.ztest != enable){
 		rwStateCache.ztest = enable;
-		if(rwStateCache.zwrite && !enable){
-			// If we still want to write, enable but set mode to always
-			setRenderState(D3DRS_ZENABLE, TRUE);
-			setRenderState(D3DRS_ZFUNC, D3DCMP_ALWAYS);
-		}else{
-			setRenderState(D3DRS_ZENABLE, rwStateCache.ztest);
-			setRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
-		}
+		if(!rwStateCache.zwrite)
+			setRenderState(D3DRS_ZENABLE, enable ? TRUE : FALSE);
+		setRenderState(D3DRS_ZFUNC, enable ? D3DCMP_LESSEQUAL : D3DCMP_ALWAYS);
 	}
 }
 
@@ -435,14 +435,40 @@ setDepthWrite(bool32 enable)
 {
 	if(rwStateCache.zwrite != enable){
 		rwStateCache.zwrite = enable;
-		if(enable && !rwStateCache.ztest){
-			// Have to switch on ztest so writing can work
-			setRenderState(D3DRS_ZENABLE, TRUE);
-			setRenderState(D3DRS_ZFUNC, D3DCMP_ALWAYS);
-		}
-		setRenderState(D3DRS_ZWRITEENABLE, rwStateCache.zwrite);
+		if(!rwStateCache.ztest)
+			setRenderState(D3DRS_ZENABLE, enable ? TRUE : FALSE);
+		setRenderState(D3DRS_ZWRITEENABLE, enable ? TRUE : FALSE);
 	}
 }
+
+// alpha test function: the eight comparison functions map 1:1 to D3DCMP_*, the alpha test is enabled for every function except ALWAYS,
+// but only switched on at the device while alpha blending is on (ALPHABLENDENABLE gates it everywhere else too)
+static const uint32 alphafuncMapRW[] = {
+	D3DCMP_ALWAYS, D3DCMP_NEVER, D3DCMP_LESS, D3DCMP_EQUAL, D3DCMP_LESSEQUAL, D3DCMP_GREATER, D3DCMP_NOTEQUAL, D3DCMP_GREATEREQUAL, D3DCMP_ALWAYS
+};
+void
+setAlphaTestFuncRW(uint32 func)
+{
+	if(func < 1 || func > 8)
+		return;
+	if(func != rwStateCache.alphafuncRW){
+		uint32 blend;
+		rwStateCache.alphafuncRW = func;
+		rwStateCache.alphaTestEnable = func != 8;
+		getRenderState(D3DRS_ALPHABLENDENABLE, &blend);
+		if(blend)
+			setRenderState(D3DRS_ALPHATESTENABLE, rwStateCache.alphaTestEnable);
+		setRenderState(D3DRS_ALPHAFUNC, alphafuncMapRW[func]);
+	}
+}
+uint32
+getAlphaTestFuncRW(void)
+{
+	return rwStateCache.alphafuncRW;
+}
+
+// per-mesh material callback (see rwd3d.h)
+void (*meshMaterialHook)(Material *material);
 
 static void
 setVertexAlpha(bool32 enable)
@@ -450,7 +476,7 @@ setVertexAlpha(bool32 enable)
 	if(rwStateCache.vertexAlpha != enable){
 		if(!rwStateCache.textureAlpha){
 			setRenderState(D3DRS_ALPHABLENDENABLE, enable);
-			setRenderState(D3DRS_ALPHATESTENABLE, enable);
+			setRenderState(D3DRS_ALPHATESTENABLE, enable ? rwStateCache.alphaTestEnable : 0);
 		}
 		rwStateCache.vertexAlpha = enable;
 	}
@@ -478,7 +504,7 @@ setRasterStage(uint32 stage, Raster *raster)
 				rwStateCache.textureAlpha = alpha;
 				if(!rwStateCache.vertexAlpha){
 					setRenderState(D3DRS_ALPHABLENDENABLE, alpha);
-					setRenderState(D3DRS_ALPHATESTENABLE, alpha);
+					setRenderState(D3DRS_ALPHATESTENABLE, alpha ? rwStateCache.alphaTestEnable : 0);
 				}
 			}
 		}
@@ -1674,6 +1700,19 @@ initD3D(void)
 	rwStateCache.alphafunc = ALPHAGREATEREQUAL;
 	d3ddevice->SetRenderState(D3DRS_ALPHAREF, 10);
 	rwStateCache.alpharef = 10;
+	// RW's alpha test defaults: GREATER, reference 0, alpha test enabled while blending
+	d3ddevice->SetRenderState(D3DRS_ALPHAFUNC, D3DCMP_GREATER);
+	rwStateCache.alphafuncRW = 5;
+	rwStateCache.alphaTestEnable = 1;
+	d3ddevice->SetRenderState(D3DRS_ALPHAREF, 0);
+	rwStateCache.alpharef = 0;
+	// RW starts with the z test and z write on (ZENABLE, ZFUNC LESSEQUAL); the cache has to say so, or an application's first
+	// "test off / write off" would be swallowed as "unchanged" and the device would keep testing
+	d3ddevice->SetRenderState(D3DRS_ZENABLE, TRUE);
+	d3ddevice->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+	d3ddevice->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+	rwStateCache.ztest = 1;
+	rwStateCache.zwrite = 1;
 
 	rwStateCache.gsalpha = 0;
 	rwStateCache.gsalpharef = 128;

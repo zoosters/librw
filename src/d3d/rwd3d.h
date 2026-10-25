@@ -302,6 +302,12 @@ void getTextureStageState(uint32 stage, uint32 type, uint32 *value);
 void setSamplerState(uint32 stage, uint32 type, uint32 value);
 void getSamplerState(uint32 stage, uint32 type, uint32 *value);
 void flushCache(void);
+// alpha test function (1..8 = NEVER LESS EQUAL LESSEQUAL GREATER NOTEQUAL GREATEREQUAL ALWAYS)
+void setAlphaTestFuncRW(uint32 func);
+uint32 getAlphaTestFuncRW(void);
+// per-mesh material callback (called with the mesh's material before the mesh is drawn, result ignored) that the
+// render callbacks of the default and MatFX pipelines run; the application sets it here
+extern void (*meshMaterialHook)(Material *material);
 
 void setTexture(uint32 stage, Texture *tex);
 void setMaterial(const RGBA &color, const SurfaceProperties &surfaceprops, float extraSurfProp = 0.0f);

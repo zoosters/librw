@@ -165,6 +165,9 @@ defaultRenderCB_Shader(Atomic *atomic, InstanceDataHeader *header)
 	for(uint32 i = 0; i < header->numMeshes; i++){
 		Material *m = inst->material;
 
+		if(d3d::meshMaterialHook)	// per-mesh material callback, called first for every mesh
+			d3d::meshMaterialHook(m);
+
 		SetRenderState(VERTEXALPHA, inst->vertexAlpha || m->color.alpha != 255);
 
 		setMaterial(flags, m->color, m->surfaceProps);
