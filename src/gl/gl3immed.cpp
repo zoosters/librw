@@ -121,6 +121,14 @@ im2DSetXform(void)
 	xform[1] = -2.0f/cam->frameBuffer->height;
 	xform[2] = -1.0f;
 	xform[3] = 1.0f;
+	{	// zoosters: D3D pixel centres (integer screen coordinates) -> GL's (+0.5), see beginUpdate
+		static int on = -1;
+		if(on < 0) on = getenv("PORT_GL_NOHALFPIXEL") == nil;
+		if(on){
+			xform[2] += 1.0f/cam->frameBuffer->width;
+			xform[3] -= 1.0f/cam->frameBuffer->height;
+		}
+	}
 	setUniform(u_xform, xform);
 //	glUniform4fv(currentShader->uniformLocations[u_xform], 1, xform);
 }

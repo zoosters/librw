@@ -1414,6 +1414,20 @@ beginUpdate(Camera *cam)
 		proj[15] = 1.0f;
 	}
 	memcpy(&cam->devProj, &proj, sizeof(RawMatrix));
+	// zoosters: Direct3D pixel centres are at integer window coordinates, GL's at +0.5: shift the image half a pixel right and
+	// down (x_clip += w_clip / width, y_clip -= w_clip / height) so that edges and texels land where D3D puts them (content
+	// authored for D3D8 expects that). PORT_GL_NOHALFPIXEL=1 off. devProj keeps the plain projection.
+	{
+		static int on = -1;
+		if(on < 0) on = getenv("PORT_GL_NOHALFPIXEL") == nil;
+		if(on && cam->frameBuffer && cam->frameBuffer->width > 0 && cam->frameBuffer->height > 0){
+			float32 dx = 1.0f/cam->frameBuffer->width, dy = -1.0f/cam->frameBuffer->height;
+			for(int k = 0; k < 4; k++){
+				proj[4*k] += dx*proj[4*k+3];
+				proj[4*k+1] += dy*proj[4*k+3];
+			}
+		}
+	}
 	setProjectionMatrix(proj);
 
 	if(rwStateCache.fogStart != cam->fogPlane){
