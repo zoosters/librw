@@ -29,6 +29,7 @@ static void *matfx_env_amb_dir_VS;
 static void *matfx_env_all_VS;
 static void *matfx_env_PS;
 static void *matfx_env_tex_PS;
+static void *matfx_envpass_PS;	
 
 enum
 {
@@ -95,13 +96,104 @@ uploadEnvMatrix(Frame *frame)
 	d3ddevice->SetVertexShaderConstantF(VSLOC_texMat, (float*)&envMtx, 4);
 }
 
+// Env transform of RW 3.6's D3D8 MatFX: the device generates camera space normals
+// (D3DTSS_TCI_CAMERASPACENORMAL) and transforms them by [D * inv(envFrame LTM) * camera LTM] (frame given, D = negate the x row) * normal2texcoord, or by
+// normal2texcoord alone when the env map has no frame. The shader gets world normals, so the world -> camera space normal rotation (the D3D view matrix
+// mirrors x) is prepended.
+static RawMatrix normal2texcoordRW = {
+	{ 0.5f,  0.0f, 0.0f }, 0.0f,
+	{ 0.0f, -0.5f, 0.0f }, 0.0f,
+	{ 0.0f,  0.0f, 1.0f }, 0.0f,
+	{ 0.5f,  0.5f, 0.0f }, 1.0f
+};
+
+static void
+uploadEnvMatrixRW(Frame *frame)
+{
+	Camera *cam = engine->currentCamera;
+	Matrix *camLTM = cam->getFrame()->getLTM();
+	Matrix viewRot;
+	Matrix::invert(&viewRot, camLTM);
+	viewRot.right.x = -viewRot.right.x;
+	viewRot.up.x = -viewRot.up.x;
+	viewRot.at.x = -viewRot.at.x;
+	viewRot.pos.set(0.0f, 0.0f, 0.0f);
+	Matrix A;
+	A.setIdentity();
+	if(frame){
+		Matrix invF;
+		Matrix::invert(&invF, frame->getLTM());
+		Matrix::mult(&A, &invF, camLTM);
+		A.right.x = -A.right.x;
+		A.right.y = -A.right.y;
+		A.right.z = -A.right.z;
+		A.pos.set(0.0f, 0.0f, 0.0f);
+	}
+	RawMatrix rv, ra, tmp, tot;
+	convMatrix(&rv, &viewRot);
+	convMatrix(&ra, &A);
+	RawMatrix::mult(&tmp, &rv, &ra);
+	RawMatrix::mult(&tot, &tmp, &normal2texcoordRW);
+	d3ddevice->SetVertexShaderConstantF(VSLOC_texMat, (float*)&tot, 4);
+}
+
+// Env map in two passes like RW 3.6's D3D8 MatFX (the generic path):
+// pass 1 = the base mesh (default render), pass 2 = the env texture, z write off, SRCALPHA / ONE blend, lighting off,
+// colour = env texture * coefficient byte (trunc(coefficient * 255) / 255), alpha = env texture alpha, fog colour black. Skipped when the byte is 0.
+// RW's single-pass shortcuts for opaque, alpha-less textures and its pixel shader variant are not ported.
+// PORT_ENVONEPASS=1 keeps librw's combined one-draw version.
 void
 matfxRender_EnvMap(InstanceDataHeader *header, InstanceData *inst, int32 lightBits, MatFX::Env *env)
 {
 	Material *m = inst->material;
 
-	if(env->tex == nil || env->coefficient == 0.0f){
+	static int onePass = -1;
+	if(onePass < 0) onePass = getenv("PORT_ENVONEPASS") ? 1 : 0;
+
+	int32 cbyte = env->tex ? (int32)(env->coefficient * 255.0f) : 0;
+	if(env->tex == nil || cbyte <= 0){
 		matfxRender_Default(header, inst, lightBits);
+		return;
+	}
+
+	if(!onePass){
+		// pass 1: base
+		matfxRender_Default(header, inst, lightBits);
+
+		// pass 2: environment map
+		uint32 oldSrc = GetRenderState(SRCBLEND), oldDst = GetRenderState(DESTBLEND);
+		uint32 oldZW = GetRenderState(ZWRITEENABLE), oldVA = GetRenderState(VERTEXALPHA);
+		d3d::setTexture(0, env->tex);
+		d3d::setTexture(1, env->tex);
+		uploadEnvMatrixRW(env->frame);
+		SetRenderState(VERTEXALPHA, 1);
+		SetRenderState(SRCBLEND, BLENDSRCALPHA);
+		SetRenderState(DESTBLEND, BLENDONE);
+		SetRenderState(ZWRITEENABLE, 0);
+
+		static float zero[4];
+		float fxparams[4];
+		fxparams[0] = (cbyte > 255 ? 255 : cbyte) / 255.0f;
+		fxparams[1] = fxparams[2] = fxparams[3] = 0.0f;
+		d3ddevice->SetPixelShaderConstantF(PSLOC_shininess, fxparams, 1);
+		d3ddevice->SetVertexShaderConstantF(VSLOC_colorClamp, zero, 1);
+		d3ddevice->SetVertexShaderConstantF(VSLOC_envColor, zero, 1);
+
+		if((lightBits & VSLIGHT_MASK) == 0)
+			setVertexShader(matfx_env_amb_VS);
+		else if((lightBits & VSLIGHT_MASK) == VSLIGHT_DIRECT)
+			setVertexShader(matfx_env_amb_dir_VS);
+		else
+			setVertexShader(matfx_env_all_VS);
+		setPixelShader(matfx_envpass_PS);
+
+		drawInst(header, inst);
+
+		SetRenderState(ZWRITEENABLE, oldZW);
+		SetRenderState(DESTBLEND, oldDst);
+		SetRenderState(SRCBLEND, oldSrc);
+		SetRenderState(VERTEXALPHA, oldVA);
+		d3d::setTexture(1, nil);
 		return;
 	}
 
@@ -245,6 +337,12 @@ createMatFXShaders(void)
 		matfx_env_tex_PS = createPixelShader((void*)PS_NAME);
 		assert(matfx_env_tex_PS);
 	}
+	{
+		static
+#include "shaders/matfx_envpass_PS.h"
+		matfx_envpass_PS = createPixelShader((void*)PS_NAME);
+		assert(matfx_envpass_PS);
+	}
 
 }
 
@@ -266,6 +364,9 @@ destroyMatFXShaders(void)
 
 	destroyPixelShader(matfx_env_tex_PS);
 	matfx_env_tex_PS = nil;
+
+	destroyPixelShader(matfx_envpass_PS);
+	matfx_envpass_PS = nil;
 }
 
 #endif
