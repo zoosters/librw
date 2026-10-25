@@ -80,7 +80,7 @@ copyUserData(void *dst, void *src, int32 offset, int32)
 	dstext->numArrays = srcext->numArrays;
 	dstext->arrays = (UserDataArray*)udMalloc(dstext->numArrays*sizeof(UserDataArray));
 	srca = srcext->arrays;
-	dsta = srcext->arrays;
+	dsta = dstext->arrays;
 	for(i = 0; i < srcext->numArrays; i++){
 		int32 len = (int32)strlen(srca->name)+1;
 		dsta->name = (char*)udMalloc(len);
