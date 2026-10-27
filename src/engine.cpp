@@ -308,7 +308,11 @@ Engine::start(void)
 		return 0;
 	}
 
-	engine->device.system(DEVICEINIT, nil, 0);
+	// no device, no engine: the driver plugins below would use a null one
+	if(!engine->device.system(DEVICEINIT, nil, 0)){
+		RWERROR((ERR_ENGINESTART));
+		return 0;
+	}
 
 	Engine::s_plglist.construct(engine);
 	for(uint i = 0; i < NUM_PLATFORMS; i++)

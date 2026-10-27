@@ -1853,6 +1853,12 @@ startD3D(void)
 		GetClientRect(d3d9Globals.window, &rect);
 		width = rect.right - rect.left;
 		height = rect.bottom - rect.top;
+		// A minimized window has no client area and CreateDevice fails on 0x0;
+		// start at the mode's size, beginUpdate resets to the client size once restored.
+		if(width == 0 || height == 0){
+			width = d3d9Globals.startMode.mode.Width;
+			height = d3d9Globals.startMode.mode.Height;
+		}
 	}else{
 		// this will be much better for restoring after iconification
 		SetWindowLong(d3d9Globals.window, GWL_STYLE, WS_POPUP);
