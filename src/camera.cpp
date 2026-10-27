@@ -345,6 +345,9 @@ Camera::destroy(void)
 	s_plglist.destruct(this);
 	assert(this->clump == nil);
 	assert(this->world == nil);
+	// RW clears the current camera at end update, librw keeps the last one
+	if(engine->currentCamera == this)
+		engine->currentCamera = nil;
 	this->setFrame(nil);
 	rwFree(this);
 	numAllocated--;
