@@ -647,7 +647,7 @@ rasterContextRender(Raster *src, Rect *rect, bool32 scaled, bool32 alpha)
 	float32 x0 = (float32)rect->x, y0 = (float32)rect->y, x1 = x0 + dw, y1 = y0 + dh;
 	float32 u0 = (float32)src->offsetX/stop->width, v0 = (float32)src->offsetY/stop->height;
 	float32 u1 = (float32)(src->offsetX + src->width)/stop->width, v1 = (float32)(src->offsetY + src->height)/stop->height;
-	uint8 c = getenv("PORT_NOMODULATE2X") ? 255 : 128;	// SELECTARG1 TEXTURE under the MODULATE2X shader: diffuse 1/2
+	uint8 c = 128;	// SELECTARG1 TEXTURE under the MODULATE2X shader: diffuse 1/2
 	Im2DVertex v[4];
 	float32 xs[4] = { x0, x0, x1, x1 }, ys[4] = { y0, y1, y0, y1 }, us[4] = { u0, u0, u1, u1 }, vs[4] = { v0, v1, v0, v1 };
 	for(int i = 0; i < 4; i++){
@@ -1315,10 +1315,8 @@ flushCache(void)
 	uniformState.fogRange = 1.0f/(rwStateCache.fogStart - rwStateCache.fogEnd);
 
 	{	// zoosters: D3DTOP_MODULATE2X of RW's D3D8 texture stage 0 (as on d3d9): textured draws get rgb * 2, untextured
-		// ones (the white texture) not; the shaders multiply by 1 + u_alphaRef.z. PORT_NOMODULATE2X=1 -> plain modulate.
-		static int noGain = -1;
-		if(noGain < 0) noGain = getenv("PORT_NOMODULATE2X") != nil;
-		float32 g = (!noGain && rwStateCache.texstage[0].raster) ? 1.0f : 0.0f;
+		// ones (the white texture) not; the shaders multiply by 1 + u_alphaRef.z.
+		float32 g = rwStateCache.texstage[0].raster ? 1.0f : 0.0f;
 		if(g != texGain){
 			texGain = g;
 			uniformStateDirty[RWGL_ALPHAFUNC] = true;
@@ -1587,16 +1585,12 @@ beginUpdate(Camera *cam)
 	memcpy(&cam->devProj, &proj, sizeof(RawMatrix));
 	// zoosters: Direct3D pixel centres are at integer window coordinates, GL's at +0.5: shift the image half a pixel right and
 	// down (x_clip += w_clip / width, y_clip -= w_clip / height) so that edges and texels land where D3D puts them (content
-	// authored for D3D8 expects that). PORT_GL_NOHALFPIXEL=1 off. devProj keeps the plain projection.
-	{
-		static int on = -1;
-		if(on < 0) on = getenv("PORT_GL_NOHALFPIXEL") == nil;
-		if(on && cam->frameBuffer && cam->frameBuffer->width > 0 && cam->frameBuffer->height > 0){
-			float32 dx = 1.0f/cam->frameBuffer->width, dy = -1.0f/cam->frameBuffer->height;
-			for(int k = 0; k < 4; k++){
-				proj[4*k] += dx*proj[4*k+3];
-				proj[4*k+1] += dy*proj[4*k+3];
-			}
+	// authored for D3D8 expects that). devProj keeps the plain projection.
+	if(cam->frameBuffer && cam->frameBuffer->width > 0 && cam->frameBuffer->height > 0){
+		float32 dx = 1.0f/cam->frameBuffer->width, dy = -1.0f/cam->frameBuffer->height;
+		for(int k = 0; k < 4; k++){
+			proj[4*k] += dx*proj[4*k+3];
+			proj[4*k+1] += dy*proj[4*k+3];
 		}
 	}
 	setProjectionMatrix(proj);

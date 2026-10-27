@@ -197,19 +197,15 @@ uploadEnvMatrixRW(Frame *frame)
 // zoosters: two passes like RW 3.6's D3D8 MatFX (generic path), as on d3d9:
 // pass 1 = the base mesh, pass 2 = the env texture, z write off, SRCALPHA / ONE blend, lighting off, colour = env texture * coefficient byte
 // (trunc(coefficient * 255) / 255), alpha = env texture alpha, fog colour black (ENVPASS in matfx_env.frag). Skipped when the byte is 0.
-// PORT_ENVONEPASS=1 keeps librw's combined one-draw version; PORT_ENVLOG=<file> logs the first 20 env passes, then every 500th, to that file.
+// PORT_ENVLOG=<file> logs the first 20 env passes, then every 500th, to that file.
 void
 matfxEnvRender(InstanceDataHeader *header, InstanceData *inst, int32 vsBits, uint32 flags, MatFX::Env *env)
 {
 	Material *m;
 	m = inst->material;
 
-	static int onePass = -1, envLogged = 0;
-	static const char *envLog = nil;
-	if(onePass < 0){
-		onePass = getenv("PORT_ENVONEPASS") ? 1 : 0;
-		envLog = getenv("PORT_ENVLOG");
-	}
+	static int envLogged = 0;
+	static const char *envLog = getenv("PORT_ENVLOG");
 
 	int32 cbyte = env->tex ? (int32)(env->coefficient * 255.0f) : 0;
 	if(env->tex == nil || cbyte <= 0){
@@ -217,7 +213,7 @@ matfxEnvRender(InstanceDataHeader *header, InstanceData *inst, int32 vsBits, uin
 		return;
 	}
 
-	if(!onePass){
+	{	// own scope: librw's one-pass version below uses the same names
 		// pass 1: base
 		matfxDefaultRender(header, inst, vsBits, flags);
 
@@ -259,6 +255,7 @@ matfxEnvRender(InstanceDataHeader *header, InstanceData *inst, int32 vsBits, uin
 		return;
 	}
 
+	// librw's one-pass version, unused since the two-pass one above
 	setTexture(0, m->texture);
 	setTexture(1, env->tex);
 	uploadEnvMatrix(env->frame);

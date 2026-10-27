@@ -567,17 +567,10 @@ setTexture(uint32 stage, Texture *tex)
 }
 
 // a mesh whose material has no texture binds NULL on stage 0, as RW does for every mesh.
-// PORT_STALETEX=1 keeps librw's old behaviour (the previous mesh's texture and its alpha-blend state stay bound) for A/B runs.
 void
 unbindTexture0(void)
 {
-	static int stale = -1;
-	if(stale < 0){
-		const char *e = getenv("PORT_STALETEX");
-		stale = e && e[0] == '1';
-	}
-	if(!stale)
-		setTexture(0, nil);
+	setTexture(0, nil);
 }
 
 void
@@ -901,10 +894,8 @@ setPixelShader(void *ps)
 	if(deviceCache.pixelShader != ps){
 		deviceCache.pixelShader = (IDirect3DPixelShader9*)ps;
 		d3ddevice->SetPixelShader(deviceCache.pixelShader);
-		// c2.x = gain of the textured pixel shaders = 2 (D3DTOP_MODULATE2X, as RW's D3D8 texture stage 0 does);
-		// PORT_NOMODULATE2X=1 -> 1 (librw's plain modulate)
-		static float gain[4] = { -1.0f, 0.0f, 0.0f, 0.0f };
-		if(gain[0] < 0.0f) gain[0] = getenv("PORT_NOMODULATE2X") ? 1.0f : 2.0f;
+		// c2.x = gain of the textured pixel shaders = 2 (D3DTOP_MODULATE2X, as RW's D3D8 texture stage 0 does)
+		static float gain[4] = { 2.0f, 0.0f, 0.0f, 0.0f };
 		d3ddevice->SetPixelShaderConstantF(2, gain, 1);
 	}
 }
@@ -1581,16 +1572,6 @@ rasterContextClear(uint32 pixel)
 	return 0;
 }
 
-static float
-texGain(void)
-{
-	// the textured Im2D pixel shader multiplies texture * diffuse by c2.x (2 = D3DTOP_MODULATE2X); RW's raster blit
-	// uses D3DTOP_SELECTARG1 TEXTURE, so the diffuse that gives texture * 1 is 1/gain
-	static float g = -1.0f;
-	if(g < 0.0f) g = getenv("PORT_NOMODULATE2X") ? 1.0f : 2.0f;
-	return g;
-}
-
 // rect: destination (x, y [, w, h when scaled]) relative to the context raster.
 bool32
 rasterContextRender(Raster *src, Rect *rect, bool32 scaled, bool32 alpha)
@@ -1634,7 +1615,9 @@ rasterContextRender(Raster *src, Rect *rect, bool32 scaled, bool32 alpha)
 	float x1 = x0 + (scaled ? rect->w : src->width), y1 = y0 + (scaled ? rect->h : src->height);
 	float u0 = (float)src->offsetX/stop->width, v0 = (float)src->offsetY/stop->height;
 	float u1 = (float)(src->offsetX + src->width)/stop->width, v1 = (float)(src->offsetY + src->height)/stop->height;
-	uint32 col = texGain() == 2.0f ? 0xFF808080 : 0xFFFFFFFF;
+	// the textured Im2D pixel shader multiplies texture * diffuse by 2 (D3DTOP_MODULATE2X); RW's raster blit uses
+	// D3DTOP_SELECTARG1 TEXTURE, so the diffuse that gives texture * 1 is 1/2
+	uint32 col = 0xFF808080;
 	Im2DVertex v[4] = {
 		{ x0, y0, 0.0f, 1.0f, col, u0, v0 },
 		{ x0, y1, 0.0f, 1.0f, col, u0, v1 },

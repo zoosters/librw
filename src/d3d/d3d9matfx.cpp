@@ -143,14 +143,10 @@ uploadEnvMatrixRW(Frame *frame)
 // pass 1 = the base mesh (default render), pass 2 = the env texture, z write off, SRCALPHA / ONE blend, lighting off,
 // colour = env texture * coefficient byte (trunc(coefficient * 255) / 255), alpha = env texture alpha, fog colour black. Skipped when the byte is 0.
 // RW's single-pass shortcuts for opaque, alpha-less textures and its pixel shader variant are not ported.
-// PORT_ENVONEPASS=1 keeps librw's combined one-draw version.
 void
 matfxRender_EnvMap(InstanceDataHeader *header, InstanceData *inst, int32 lightBits, MatFX::Env *env)
 {
 	Material *m = inst->material;
-
-	static int onePass = -1;
-	if(onePass < 0) onePass = getenv("PORT_ENVONEPASS") ? 1 : 0;
 
 	int32 cbyte = env->tex ? (int32)(env->coefficient * 255.0f) : 0;
 	if(env->tex == nil || cbyte <= 0){
@@ -158,7 +154,7 @@ matfxRender_EnvMap(InstanceDataHeader *header, InstanceData *inst, int32 lightBi
 		return;
 	}
 
-	if(!onePass){
+	{	// own scope: librw's one-pass version below uses the same names
 		// pass 1: base
 		matfxRender_Default(header, inst, lightBits);
 
@@ -199,6 +195,7 @@ matfxRender_EnvMap(InstanceDataHeader *header, InstanceData *inst, int32 lightBi
 		return;
 	}
 
+	// librw's one-pass version, unused since the two-pass one above
 	d3d::setTexture(1, env->tex);
 	uploadEnvMatrix(env->frame);
 

@@ -1,6 +1,6 @@
 // textured pixel shader with the D3D8 stage 0 combiner COLOROP = MODULATE2X
 // (texture * diffuse * 2), alpha = texture * diffuse as before.
-// texGain.x is 2.0 (default) or 1.0 (PORT_NOMODULATE2X=1, plain modulate as librw).
+// texGain.x is 2.0.
 struct VS_out {
 	float4 Position		: POSITION;
 	float3 TexCoord0	: TEXCOORD0;
